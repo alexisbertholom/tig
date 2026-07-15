@@ -22,6 +22,9 @@
 #include "tig/draw.h"
 #include "tig/apps.h"
 
+static bool diff_highlight_is_internal(void);
+static void diff_refine_free(struct diff_refine **rp);
+
 static enum status_code
 diff_open(struct view *view, enum open_flags flags)
 {
@@ -46,7 +49,22 @@ diff_open(struct view *view, enum open_flags flags)
 enum status_code
 diff_init_highlight(struct view *view, struct diff_state *state)
 {
-	if (!opt_diff_highlight || !*opt_diff_highlight || opt_word_diff)
+	state->highlight = false;
+	state->native_refine = false;
+	/* Discard any buffer left over from a previous, aborted load. */
+	diff_refine_free(&state->refine);
+
+	if (opt_word_diff)
+		return SUCCESS;
+
+	/* "internal" enables the built-in word refinement, so that no external
+	 * diff-highlight program (and no output cleanup) is required. */
+	if (diff_highlight_is_internal()) {
+		state->native_refine = true;
+		return SUCCESS;
+	}
+
+	if (!opt_diff_highlight || !*opt_diff_highlight)
 		return SUCCESS;
 
 	struct app_external *app = app_diff_highlight_load(opt_diff_highlight);
@@ -302,6 +320,328 @@ diff_common_highlight(struct view *view, const char *text, enum line_type type)
 	return diff_common_add_line(view, text, type, &context);
 }
 
+/*
+ * Native intra-line diff refinement.
+ *
+ * Reimplements the word-level highlighting otherwise delegated to an external
+ * "diff-highlight" program (e.g. diffr): each maximal block of removed (-) and
+ * added (+) lines is buffered, a longest common subsequence of their words is
+ * computed, and the words that are *not* shared are emitted as
+ * LINE_DIFF_*_HIGHLIGHT cells.  No external process, and thus no output
+ * sanitizing, is needed.
+ *
+ * Enabled with "set diff-highlight = internal".
+ */
+
+/* Skip refinement when the token product would be too large, to bound the cost
+ * of the O(n*m) longest common subsequence on pathological blocks. */
+#define REFINE_MAX_PRODUCT 500000
+
+struct refine_line {
+	char *text;			/* owned copy of the stored diff line */
+	enum line_type type;
+	bool added;
+	unsigned int prefix;		/* marker + indent, never highlighted */
+	int tok_first, tok_count;	/* range into the removed/added tokens */
+};
+
+struct refine_token {
+	int line;			/* index into refine->line[] */
+	unsigned int lo, hi;		/* byte range within that line's text */
+	bool shared;			/* part of the common subsequence */
+};
+
+struct diff_refine {
+	struct refine_line *line;
+	size_t lines, lines_alloc;
+	struct refine_token *removed, *added;
+	size_t nremoved, removed_alloc;
+	size_t nadded, added_alloc;
+};
+
+static bool
+diff_highlight_is_internal(void)
+{
+	return opt_diff_highlight && !strcmp(opt_diff_highlight, "internal");
+}
+
+/* diffr's classification: a word is a run of alphanumerics/'_' (and, kept
+ * whole, any UTF-8 continuation), spaces are runs of ' '/'\t', and every other
+ * byte is its own token. */
+static int
+refine_char_kind(unsigned char c)
+{
+	if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+	    (c >= '0' && c <= '9') || c == '_' || c >= 0x80)
+		return 1;
+	if (c == ' ' || c == '\t')
+		return 2;
+	return 0;
+}
+
+static unsigned int
+refine_prefix_len(const char *s)
+{
+	unsigned int i = 0;
+
+	if (s[0] == '+' || s[0] == '-' || s[0] == ' ')
+		i = 1;
+	while (s[i] == ' ' || s[i] == '\t')
+		i++;
+	return i;
+}
+
+static bool
+refine_token_push(struct refine_token **arr, size_t *n, size_t *alloc,
+		  int line, size_t lo, size_t hi)
+{
+	if (*n == *alloc) {
+		size_t na = *alloc ? *alloc * 2 : 256;
+		struct refine_token *p = realloc(*arr, na * sizeof(*p));
+
+		if (!p)
+			return false;
+		*arr = p;
+		*alloc = na;
+	}
+	(*arr)[*n].line = line;
+	(*arr)[*n].lo = lo;
+	(*arr)[*n].hi = hi;
+	(*arr)[*n].shared = false;
+	(*n)++;
+	return true;
+}
+
+static bool
+refine_tokenize(struct diff_refine *r, int line_idx)
+{
+	struct refine_line *ln = &r->line[line_idx];
+	const char *s = ln->text;
+	size_t len = strlen(s);
+	size_t i = ln->prefix;
+	struct refine_token **arr = ln->added ? &r->added : &r->removed;
+	size_t *n = ln->added ? &r->nadded : &r->nremoved;
+	size_t *alloc = ln->added ? &r->added_alloc : &r->removed_alloc;
+
+	ln->tok_first = (int) *n;
+	while (i < len) {
+		int kind = refine_char_kind((unsigned char) s[i]);
+		size_t lo = i;
+
+		i++;
+		if (kind != 0)
+			while (i < len &&
+			       refine_char_kind((unsigned char) s[i]) == kind)
+				i++;
+		if (!refine_token_push(arr, n, alloc, line_idx, lo, i))
+			return false;
+	}
+	ln->tok_count = (int) *n - ln->tok_first;
+	return true;
+}
+
+static bool
+refine_push_line(struct diff_refine *r, const char *text, enum line_type type,
+		 bool added)
+{
+	struct refine_line *ln;
+	char *copy = strdup(text);
+
+	if (!copy)
+		return false;
+	if (r->lines == r->lines_alloc) {
+		size_t na = r->lines_alloc ? r->lines_alloc * 2 : 32;
+		struct refine_line *p = realloc(r->line, na * sizeof(*p));
+
+		if (!p) {
+			free(copy);
+			return false;
+		}
+		r->line = p;
+		r->lines_alloc = na;
+	}
+	ln = &r->line[r->lines++];
+	ln->text = copy;
+	ln->type = type;
+	ln->added = added;
+	ln->prefix = refine_prefix_len(copy);
+	ln->tok_first = ln->tok_count = 0;
+	return refine_tokenize(r, (int) (r->lines - 1));
+}
+
+static bool
+refine_token_eq(struct diff_refine *r, struct refine_token *a,
+		struct refine_token *b)
+{
+	size_t la = a->hi - a->lo;
+
+	if (la != b->hi - b->lo)
+		return false;
+	return memcmp(r->line[a->line].text + a->lo,
+		      r->line[b->line].text + b->lo, la) == 0;
+}
+
+/* Mark the longest common subsequence of removed/added tokens as shared, via a
+ * standard suffix-table dynamic program.  Returns false only on allocation
+ * failure, in which case the block is emitted without refinement. */
+static bool
+refine_lcs(struct diff_refine *r)
+{
+	size_t n = r->nremoved, m = r->nadded, stride = m + 1;
+	size_t i, j;
+	int *l = calloc((n + 1) * stride, sizeof(int));
+
+	if (!l)
+		return false;
+
+	for (i = n; i-- > 0; ) {
+		for (j = m; j-- > 0; ) {
+			if (refine_token_eq(r, &r->removed[i], &r->added[j])) {
+				l[i * stride + j] = l[(i + 1) * stride + j + 1] + 1;
+			} else {
+				int down = l[(i + 1) * stride + j];
+				int right = l[i * stride + j + 1];
+
+				l[i * stride + j] = down >= right ? down : right;
+			}
+		}
+	}
+
+	for (i = 0, j = 0; i < n && j < m; ) {
+		if (refine_token_eq(r, &r->removed[i], &r->added[j])) {
+			r->removed[i].shared = r->added[j].shared = true;
+			i++;
+			j++;
+		} else if (l[(i + 1) * stride + j] >= l[i * stride + j + 1]) {
+			i++;
+		} else {
+			j++;
+		}
+	}
+
+	free(l);
+	return true;
+}
+
+static bool
+refine_emit_plain(struct view *view, struct refine_line *ln)
+{
+	return pager_common_read(view, ln->text, ln->type, NULL);
+}
+
+static bool
+refine_emit_line(struct view *view, struct diff_refine *r,
+		 struct refine_line *ln)
+{
+	struct diff_stat_context ctx = { ln->text, ln->type };
+	enum line_type hi = (ln->type == LINE_DIFF_ADD || ln->type == LINE_DIFF_ADD2)
+			    ? LINE_DIFF_ADD_HIGHLIGHT : LINE_DIFF_DEL_HIGHLIGHT;
+	struct refine_token *toks = ln->added ? r->added : r->removed;
+	bool ok = true;
+	int t;
+
+	if (ln->prefix)
+		ok = diff_common_add_cell(&ctx, ln->prefix, false);
+
+	for (t = 0; ok && t < ln->tok_count; ) {
+		struct refine_token *tok = &toks[ln->tok_first + t];
+		bool shared = tok->shared;
+		size_t end = tok->hi;
+		int t2 = t + 1;
+
+		while (t2 < ln->tok_count &&
+		       toks[ln->tok_first + t2].shared == shared) {
+			end = toks[ln->tok_first + t2].hi;
+			t2++;
+		}
+		ctx.type = shared ? ln->type : hi;
+		ok = diff_common_add_cell(&ctx, end - tok->lo, false);
+		t = t2;
+	}
+
+	/* Fall back to a plain line if the cell budget was exhausted. */
+	if (!ok)
+		return refine_emit_plain(view, ln);
+
+	return diff_common_add_line(view, ln->text, ln->type, &ctx) != NULL;
+}
+
+static void
+diff_refine_reset(struct diff_refine *r)
+{
+	size_t i;
+
+	for (i = 0; i < r->lines; i++)
+		free(r->line[i].text);
+	r->lines = r->nremoved = r->nadded = 0;
+}
+
+static void
+diff_refine_free(struct diff_refine **rp)
+{
+	struct diff_refine *r = *rp;
+
+	if (!r)
+		return;
+	diff_refine_reset(r);
+	free(r->line);
+	free(r->removed);
+	free(r->added);
+	free(r);
+	*rp = NULL;
+}
+
+static bool
+diff_refine_flush(struct view *view, struct diff_state *state)
+{
+	struct diff_refine *r = state->refine;
+	bool refine, ok = true;
+	size_t k;
+
+	if (!r || r->lines == 0)
+		return true;
+
+	/* Highlight as long as there is content.  When one side is empty (a pure
+	 * insertion or deletion) every token is new, so the whole run is
+	 * highlighted, as diffr does.  The common subsequence is only needed when
+	 * both sides exist, and is skipped above the product guard to bound the
+	 * cost of the O(n*m) dynamic program on pathological blocks. */
+	refine = r->nremoved > 0 || r->nadded > 0;
+	if (r->nremoved > 0 && r->nadded > 0) {
+		if ((unsigned long long) r->nremoved * r->nadded > REFINE_MAX_PRODUCT)
+			refine = false;
+		else if (!refine_lcs(r))
+			refine = false;
+	}
+
+	for (k = 0; ok && k < r->lines; k++)
+		ok = refine ? refine_emit_line(view, r, &r->line[k])
+			    : refine_emit_plain(view, &r->line[k]);
+
+	diff_refine_reset(r);
+	return ok;
+}
+
+static bool
+diff_refine_is_content(struct diff_state *state, enum line_type type)
+{
+	if (!state->native_refine || state->combined_diff ||
+	    !state->reading_diff_chunk)
+		return false;
+	return type == LINE_DIFF_ADD || type == LINE_DIFF_DEL;
+}
+
+static bool
+diff_refine_push(struct diff_state *state, const char *data, enum line_type type)
+{
+	if (!state->refine) {
+		state->refine = calloc(1, sizeof(*state->refine));
+		if (!state->refine)
+			return false;
+	}
+	return refine_push_line(state->refine, data, type, type == LINE_DIFF_ADD);
+}
+
 bool
 diff_common_read(struct view *view, const char *data, struct diff_state *state)
 {
@@ -318,6 +658,11 @@ diff_common_read(struct view *view, const char *data, struct diff_state *state)
 		else if (type == LINE_DIFF_ADD_FILE)
 			type = LINE_DIFF_ADD;
 	}
+
+	/* Emit any buffered refinement block when leaving the run of +/- lines. */
+	if (state->native_refine && !diff_refine_is_content(state, type) &&
+	    !diff_refine_flush(view, state))
+		return false;
 
 	if (!view->lines && type != LINE_COMMIT)
 		state->reading_diff_stat = true;
@@ -382,6 +727,9 @@ diff_common_read(struct view *view, const char *data, struct diff_state *state)
 	if (!opt_diff_indicator && state->reading_diff_chunk &&
 	    !state->stage)
 		data += state->parents;
+
+	if (diff_refine_is_content(state, type))
+		return diff_refine_push(state, data, type);
 
 	if (state->highlight && strchr(data, 0x1b))
 		return diff_common_highlight(view, data, type);
@@ -529,6 +877,12 @@ diff_read(struct view *view, struct buffer *buf, bool force_stop)
 		return diff_read_describe(view, buf, state);
 
 	if (!buf) {
+		if (state->native_refine) {
+			if (!diff_refine_flush(view, state))
+				return false;
+			diff_refine_free(&state->refine);
+		}
+
 		if (!diff_done_highlight(state)) {
 			if (!force_stop)
 				report("Failed to run the diff-highlight program: %s", opt_diff_highlight);

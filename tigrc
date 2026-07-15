@@ -123,7 +123,8 @@ set show-notes			= yes		# When non-bool passed as `--show-notes=...` (diff)
 #set word-diff			= yes		# Show a word diff? (diff)
 #set diff-options		= -C		# User-defined options for `tig show` (git-diff)
 #set diff-highlight		= yes		# String (or bool): Path to diff-highlight script,
-						#                   defaults to `diff-highlight`.
+						#                   defaults to `diff-highlight`. Use
+						#                   `internal` for the built-in word refinement.
 set diff-indicator		= yes		# Show diff +/- signs?
 #set blame-options		= -C -C -C	# User-defined options for `tig blame` (git-blame)
 set log-options			= --cc --stat	# User-defined options for `tig log` (git-log)

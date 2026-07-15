@@ -16,6 +16,8 @@
 
 #include "tig/view.h"
 
+struct diff_refine;
+
 struct diff_state {
 	bool after_commit_title;
 	bool after_diff;
@@ -24,12 +26,14 @@ struct diff_state {
 	bool combined_diff;
 	bool adding_describe_ref;
 	bool highlight;
+	bool native_refine;
 	bool stage;
 	unsigned int parents;
 	const char *file;
 	unsigned int lineno;
 	struct position pos;
 	struct io view_io;
+	struct diff_refine *refine;
 };
 
 enum request diff_common_edit(struct view *view, enum request request, struct line *line);

@@ -290,9 +290,12 @@ The following variables can be set:
 
 	Whether to highlight diffs using Git's 'diff-highlight' program. Defaults
 	to false. When set to true then 'diff-highlight' is used, else the option
-	value is used as the path. When this option is in effect, highlighted
-	regions are governed by `color diff-add-highlight` and
-	`color diff-del-highlight`.
+	value is used as the path. The special value `internal` selects tig's
+	built-in word refinement, which needs no external program: each block of
+	removed and added lines is diffed word by word, and the words that changed
+	are highlighted (a pure insertion or deletion is highlighted whole). When
+	this option is in effect, highlighted regions are governed by
+	`color diff-add-highlight` and `color diff-del-highlight`.
 
 'diff-indicator' (bool)::
 
