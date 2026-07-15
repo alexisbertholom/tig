@@ -17,6 +17,7 @@
 #include "tig/view.h"
 
 struct diff_refine;
+struct diff_stat_group;
 
 struct diff_state {
 	bool after_commit_title;
@@ -34,6 +35,7 @@ struct diff_state {
 	struct position pos;
 	struct io view_io;
 	struct diff_refine *refine;
+	struct diff_stat_group *stat_group;
 };
 
 enum request diff_common_edit(struct view *view, enum request request, struct line *line);

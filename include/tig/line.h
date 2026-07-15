@@ -89,6 +89,7 @@ struct ref;
 	_(HELP_ACTION,		""), \
 	_(HELP_TOGGLE,		""), \
 	_(DIFF_STAT,		""), \
+	_(DIFF_STAT_HEADER,	""), \
 	_(PALETTE_0,		""), \
 	_(PALETTE_1,		""), \
 	_(PALETTE_2,		""), \

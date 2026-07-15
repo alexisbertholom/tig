@@ -23,14 +23,34 @@
 #include "tig/apps.h"
 
 static bool diff_highlight_is_internal(void);
+
+/* When grouping the diffstat, ask git for the full, untruncated paths (its
+ * default budget elides them to ".../"): tig then re-fits them to the view
+ * width itself.  Raising --stat-name-width alone has no effect, so --stat-width
+ * is raised too, and the +/- graph is capped to keep the tail short. */
+static const char *diff_stat_width_arg(void)
+{
+	return opt_diff_stat_group ? "--stat-width=32767" : "";
+}
+static const char *diff_stat_name_width_arg(void)
+{
+	return opt_diff_stat_group ? "--stat-name-width=32767" : "";
+}
+static const char *diff_stat_graph_width_arg(void)
+{
+	return opt_diff_stat_group ? "--stat-graph-width=20" : "";
+}
 static void diff_refine_free(struct diff_refine **rp);
+static void diff_statgrp_free(struct diff_stat_group **gp);
 
 static enum status_code
 diff_open(struct view *view, enum open_flags flags)
 {
 	const char *diff_argv[] = {
 		"git", "show", encoding_arg, "--pretty=fuller", "--root",
-			"--patch-with-stat", use_mailmap_arg(),
+			"--patch-with-stat", diff_stat_width_arg(),
+			diff_stat_name_width_arg(), diff_stat_graph_width_arg(),
+			use_mailmap_arg(),
 			show_notes_arg(), diff_context_arg(), ignore_space_arg(),
 			DIFF_ARGS, "%(cmdlineargs)", "--no-color", word_diff_arg(),
 			"%(commit)", "--", "%(fileargs)", NULL
@@ -53,6 +73,7 @@ diff_init_highlight(struct view *view, struct diff_state *state)
 	state->native_refine = false;
 	/* Discard any buffer left over from a previous, aborted load. */
 	diff_refine_free(&state->refine);
+	diff_statgrp_free(&state->stat_group);
 
 	if (opt_word_diff)
 		return SUCCESS;
@@ -200,36 +221,41 @@ diff_common_read_diff_stat(struct view *view, const char *text)
 	return diff_common_add_line(view, text, LINE_DIFF_STAT, &context);
 }
 
-struct line *
-diff_common_add_diff_stat(struct view *view, const char *text, size_t offset)
+/* Detect a diff stat line:
+ *
+ *	added                    |   40 +++++++++++
+ *	remove                   |  124 --------------------------
+ *	updated                  |   14 +----
+ *	rename.from => rename.to |    0
+ *	.../truncated file name  |   11 ++---
+ *	binary add               |  Bin 0 -> 1234 bytes
+ *	binary update            |  Bin 1234 -> 2345 bytes
+ *	binary copy              |  Bin
+ *	unmerged                 | Unmerged
+ */
+static bool
+diff_stat_is_entry(const char *text)
 {
-	const char *start = text + offset;
-	const char *data = start + strspn(start, " ");
+	const char *data = text + strspn(text, " ");
 	size_t len = strlen(data);
 	const char *pipe = strchr(data, '|');
 
 	/* Ensure that '|' is present and the file name part contains
 	 * non-space characters. */
 	if (!pipe || pipe == data)
-		return NULL;
+		return false;
 
-	/* Detect remaining part of a diff stat line:
-	 *
-	 *	added                    |   40 +++++++++++
-	 *	remove                   |  124 --------------------------
-	 *	updated                  |   14 +----
-	 *	rename.from => rename.to |    0
-	 *	.../truncated file name  |   11 ++---
-	 *	binary add               |  Bin 0 -> 1234 bytes
-	 *	binary update            |  Bin 1234 -> 2345 bytes
-	 *	binary copy              |  Bin
-	 *	unmerged                 | Unmerged
-	 */
-	if ((data[len - 1] == '-' || data[len - 1] == '+') ||
-	    strstr(pipe, " 0") || strstr(pipe, "Bin") || strstr(pipe, "Unmerged") ||
-	    (data[len - 1] == '0' && (strstr(data, "=>") || !prefixcmp(data, "..."))))
-		return diff_common_read_diff_stat(view, text);
-	return NULL;
+	return (data[len - 1] == '-' || data[len - 1] == '+') ||
+	       strstr(pipe, " 0") || strstr(pipe, "Bin") || strstr(pipe, "Unmerged") ||
+	       (data[len - 1] == '0' && (strstr(data, "=>") || !prefixcmp(data, "...")));
+}
+
+struct line *
+diff_common_add_diff_stat(struct view *view, const char *text, size_t offset)
+{
+	if (!diff_stat_is_entry(text + offset))
+		return NULL;
+	return diff_common_read_diff_stat(view, text);
 }
 
 static bool
@@ -642,6 +668,430 @@ diff_refine_push(struct diff_state *state, const char *data, enum line_type type
 	return refine_push_line(state->refine, data, type, type == LINE_DIFF_ADD);
 }
 
+/*
+ * Diffstat path grouping.
+ *
+ * The paths in a diffstat are mostly made of directories shared with the file
+ * above, which pushes the interesting part (the file name and the graph) far
+ * to the right.  With "set diff-stat-group = yes", the shared directories of a
+ * run of files are printed once as a "[prefix/]" header and elided from the
+ * files below it:
+ *
+ *	[apps/web-client/src/components/]
+ *	App.tsx                       | 2 +
+ *	common/AppTopBar.tsx          | 8 ++
+ *
+ * The whole stat block is buffered, and a prefix trie of the paths is cut so
+ * that the number of headers is minimized while every file still fits the view
+ * width -- the files are grouped only as deeply as the width forces, and never
+ * reordered.  The headers use a dedicated line type so that jumping to a file
+ * diff, which counts stat lines by position, keeps landing on the right file.
+ */
+
+#define STATGRP_MIN_FILES 2
+#define STATGRP_INF (1 << 28)
+
+struct statgrp_file {
+	char *text;		/* original stat line */
+	char *path;		/* file name (before '|'), trimmed */
+	size_t pathlen;
+	const char *rest;	/* "| <graph>" tail, points into text */
+	int group;		/* index into the chosen groups, or -1 */
+	size_t disp;		/* offset in path where the shown part starts */
+};
+
+struct statgrp_node {
+	char *prefix;			/* full prefix incl trailing '/', "" at root */
+	size_t prefixlen;
+	struct statgrp_node **kid;
+	size_t kids, kids_alloc;
+	int *fidx;			/* files directly in this directory */
+	size_t nfidx, fidx_alloc;
+	int count;			/* files in the subtree */
+	size_t maxfull;			/* longest path in the subtree */
+	size_t maxdirect;		/* longest path among the direct files */
+	bool chosen;			/* a group starts at this node */
+};
+
+struct diff_stat_group {
+	struct statgrp_file *file;
+	size_t files, files_alloc;
+};
+
+static bool
+diff_statgrp_push(struct diff_state *state, const char *text)
+{
+	struct diff_stat_group *g = state->stat_group;
+	struct statgrp_file *f;
+	char *copy, *pipe, *start, *end;
+
+	if (!g) {
+		g = state->stat_group = calloc(1, sizeof(*g));
+		if (!g)
+			return false;
+	}
+	if (g->files == g->files_alloc) {
+		size_t na = g->files_alloc ? g->files_alloc * 2 : 16;
+		struct statgrp_file *p = realloc(g->file, na * sizeof(*p));
+
+		if (!p)
+			return false;
+		g->file = p;
+		g->files_alloc = na;
+	}
+
+	copy = strdup(text);
+	if (!copy)
+		return false;
+	pipe = strrchr(copy, '|');
+	if (!pipe) {			/* guarded by diff_stat_is_entry, defensive */
+		free(copy);
+		return false;
+	}
+
+	f = &g->file[g->files++];
+	memset(f, 0, sizeof(*f));
+	f->text = copy;
+	f->rest = pipe;
+	f->group = -1;
+
+	start = copy + strspn(copy, " ");
+	end = pipe;
+	while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+		end--;
+	f->pathlen = end - start;
+	f->path = malloc(f->pathlen + 1);
+	if (!f->path)
+		return false;
+	memcpy(f->path, start, f->pathlen);
+	f->path[f->pathlen] = 0;
+	return true;
+}
+
+/* Renames ("old => new") and paths git already truncated ("...") cannot be
+ * split into directories, so they are never grouped. */
+static bool
+statgrp_groupable(const struct statgrp_file *f)
+{
+	return strstr(f->path, " => ") == NULL &&
+	       prefixcmp(f->path, "...") != 0 &&
+	       strchr(f->path, '/') != NULL;
+}
+
+static struct statgrp_node *
+statgrp_kid(struct statgrp_node *node, const char *prefix, size_t prefixlen)
+{
+	struct statgrp_node *n;
+	size_t i;
+
+	for (i = 0; i < node->kids; i++)
+		if (node->kid[i]->prefixlen == prefixlen &&
+		    !memcmp(node->kid[i]->prefix, prefix, prefixlen))
+			return node->kid[i];
+
+	if (node->kids == node->kids_alloc) {
+		size_t na = node->kids_alloc ? node->kids_alloc * 2 : 4;
+		struct statgrp_node **p = realloc(node->kid, na * sizeof(*p));
+
+		if (!p)
+			return NULL;
+		node->kid = p;
+		node->kids_alloc = na;
+	}
+	n = calloc(1, sizeof(*n));
+	if (!n)
+		return NULL;
+	n->prefix = malloc(prefixlen + 1);
+	if (!n->prefix) {
+		free(n);
+		return NULL;
+	}
+	memcpy(n->prefix, prefix, prefixlen);
+	n->prefix[prefixlen] = 0;
+	n->prefixlen = prefixlen;
+	node->kid[node->kids++] = n;
+	return n;
+}
+
+static bool
+statgrp_insert(struct statgrp_node *root, const char *path, int fidx)
+{
+	struct statgrp_node *node = root;
+	size_t i;
+
+	for (i = 0; path[i]; i++)
+		if (path[i] == '/') {
+			node = statgrp_kid(node, path, i + 1);
+			if (!node)
+				return false;
+		}
+
+	if (node->nfidx == node->fidx_alloc) {
+		size_t na = node->fidx_alloc ? node->fidx_alloc * 2 : 4;
+		int *p = realloc(node->fidx, na * sizeof(*p));
+
+		if (!p)
+			return false;
+		node->fidx = p;
+		node->fidx_alloc = na;
+	}
+	node->fidx[node->nfidx++] = fidx;
+	return true;
+}
+
+static void
+statgrp_compute(struct statgrp_node *node, struct statgrp_file *files)
+{
+	size_t i;
+
+	node->count = 0;
+	node->maxfull = node->maxdirect = 0;
+	for (i = 0; i < node->nfidx; i++) {
+		size_t l = files[node->fidx[i]].pathlen;
+
+		node->count++;
+		if (l > node->maxfull)
+			node->maxfull = l;
+		if (l > node->maxdirect)
+			node->maxdirect = l;
+	}
+	for (i = 0; i < node->kids; i++) {
+		statgrp_compute(node->kid[i], files);
+		node->count += node->kid[i]->count;
+		if (node->kid[i]->maxfull > node->maxfull)
+			node->maxfull = node->kid[i]->maxfull;
+	}
+}
+
+/* Minimum number of headers so that every file under `node` fits `width`. */
+static int
+statgrp_solve(struct statgrp_node *node, size_t width)
+{
+	int split, group = STATGRP_INF;
+	size_t i;
+
+	if (node->maxdirect > width) {
+		split = STATGRP_INF;
+	} else {
+		split = 0;
+		for (i = 0; i < node->kids; i++) {
+			int s = statgrp_solve(node->kid[i], width);
+
+			if (s >= STATGRP_INF) {
+				split = STATGRP_INF;
+				break;
+			}
+			split += s;
+		}
+	}
+	if (node->prefixlen > 0 && node->count >= STATGRP_MIN_FILES &&
+	    node->maxfull - node->prefixlen <= width)
+		group = 1;
+	return group < split ? group : split;
+}
+
+/* Same decision as statgrp_solve, but records where the groups start. */
+static void
+statgrp_mark(struct statgrp_node *node, size_t width)
+{
+	int split, group = STATGRP_INF;
+	size_t i;
+
+	node->chosen = false;
+	if (node->maxdirect > width) {
+		split = STATGRP_INF;
+	} else {
+		split = 0;
+		for (i = 0; i < node->kids; i++) {
+			int s = statgrp_solve(node->kid[i], width);
+
+			if (s >= STATGRP_INF) {
+				split = STATGRP_INF;
+				break;
+			}
+			split += s;
+		}
+	}
+	if (node->prefixlen > 0 && node->count >= STATGRP_MIN_FILES &&
+	    node->maxfull - node->prefixlen <= width)
+		group = 1;
+
+	if (group != STATGRP_INF && group <= split) {
+		node->chosen = true;		/* group here, do not descend */
+	} else {
+		for (i = 0; i < node->kids; i++)
+			statgrp_mark(node->kid[i], width);
+	}
+}
+
+static int
+statgrp_count_chosen(struct statgrp_node *node)
+{
+	int n = node->chosen ? 1 : 0;
+	size_t i;
+
+	for (i = 0; i < node->kids; i++)
+		n += statgrp_count_chosen(node->kid[i]);
+	return n;
+}
+
+static void
+statgrp_assign(struct statgrp_node *node, struct statgrp_file *files,
+	       int cur, size_t curprefix,
+	       struct statgrp_node **groups, int *ngroups)
+{
+	size_t i;
+
+	if (node->chosen) {
+		cur = (*ngroups)++;
+		curprefix = node->prefixlen;
+		groups[cur] = node;
+	}
+	for (i = 0; i < node->nfidx; i++) {
+		files[node->fidx[i]].group = cur;
+		files[node->fidx[i]].disp = cur >= 0 ? curprefix : 0;
+	}
+	for (i = 0; i < node->kids; i++)
+		statgrp_assign(node->kid[i], files, cur, curprefix, groups, ngroups);
+}
+
+static void
+statgrp_free_node(struct statgrp_node *node)
+{
+	size_t i;
+
+	if (!node)
+		return;
+	for (i = 0; i < node->kids; i++)
+		statgrp_free_node(node->kid[i]);
+	free(node->kid);
+	free(node->fidx);
+	free(node->prefix);
+	free(node);
+}
+
+static void
+diff_statgrp_free(struct diff_stat_group **gp)
+{
+	struct diff_stat_group *g = *gp;
+	size_t i;
+
+	if (!g)
+		return;
+	for (i = 0; i < g->files; i++) {
+		free(g->file[i].text);
+		free(g->file[i].path);
+	}
+	free(g->file);
+	free(g);
+	*gp = NULL;
+}
+
+static bool
+diff_statgrp_flush(struct view *view, struct diff_state *state)
+{
+	struct diff_stat_group *g = state->stat_group;
+	struct statgrp_node *root = NULL;
+	struct statgrp_node **groups = NULL;
+	char *line = NULL, *hdr = NULL;
+	bool ok = false;
+	size_t i, maxrest = 0, maxfull = 0, maxdisp = 0;
+	size_t width, target, wmin, lo, hi, linecap, hdrcap;
+	int nchosen = 0, ngroups = 0, prev_group = -2;
+
+	if (!g || g->files == 0) {
+		diff_statgrp_free(&state->stat_group);
+		return true;
+	}
+
+	root = calloc(1, sizeof(*root));
+	if (!root)
+		goto out;
+	root->prefix = strdup("");
+	if (!root->prefix)
+		goto out;
+
+	for (i = 0; i < g->files; i++) {
+		struct statgrp_file *f = &g->file[i];
+
+		if (strlen(f->rest) > maxrest)
+			maxrest = strlen(f->rest);
+		if (f->pathlen > maxfull)
+			maxfull = f->pathlen;
+		if (statgrp_groupable(f) && !statgrp_insert(root, f->path, (int) i))
+			goto out;
+	}
+
+	statgrp_compute(root, g->file);
+
+	/* Budget for the name column so that " <name> <graph>" fits the view. */
+	width = view->width > 0 ? (size_t) view->width : 80;
+	target = width > maxrest + 2 ? width - maxrest - 2 : 1;
+
+	/* Smallest width that fits everything, so we never group more than the
+	 * narrowest feasible layout requires. */
+	lo = 1;
+	hi = maxfull > 0 ? maxfull : 1;
+	while (lo < hi) {
+		size_t mid = (lo + hi) / 2;
+
+		if (statgrp_solve(root, mid) < STATGRP_INF)
+			hi = mid;
+		else
+			lo = mid + 1;
+	}
+	wmin = lo;
+	statgrp_mark(root, target < wmin ? wmin : target);
+
+	nchosen = statgrp_count_chosen(root);
+	if (nchosen > 0) {
+		groups = calloc(nchosen, sizeof(*groups));
+		if (!groups)
+			goto out;
+	}
+	statgrp_assign(root, g->file, -1, 0, groups, &ngroups);
+
+	for (i = 0; i < g->files; i++) {
+		size_t disp = g->file[i].pathlen - g->file[i].disp;
+
+		if (disp > maxdisp)
+			maxdisp = disp;
+	}
+
+	linecap = maxdisp + maxrest + 8;
+	line = malloc(linecap);
+	hdrcap = (maxfull > maxrest ? maxfull : maxrest) + 8;
+	hdr = malloc(hdrcap);
+	if (!line || !hdr)
+		goto out;
+
+	for (i = 0; i < g->files; i++) {
+		struct statgrp_file *f = &g->file[i];
+
+		if (f->group != prev_group) {
+			if (f->group >= 0) {
+				snprintf(hdr, hdrcap, "[%s]", groups[f->group]->prefix);
+				if (!add_line_text(view, hdr, LINE_DIFF_STAT_HEADER))
+					goto out;
+			}
+			prev_group = f->group;
+		}
+		snprintf(line, linecap, " %-*s %s",
+			 (int) maxdisp, f->path + f->disp, f->rest);
+		if (!diff_common_read_diff_stat(view, line))
+			goto out;
+	}
+	ok = true;
+
+out:
+	free(line);
+	free(hdr);
+	free(groups);
+	statgrp_free_node(root);
+	diff_statgrp_free(&state->stat_group);
+	return ok;
+}
+
 bool
 diff_common_read(struct view *view, const char *data, struct diff_state *state)
 {
@@ -673,9 +1123,17 @@ diff_common_read(struct view *view, const char *data, struct diff_state *state)
 		state->reading_diff_stat = true;
 
 	if (state->reading_diff_stat) {
+		if (opt_diff_stat_group && diff_stat_is_entry(data)) {
+			if (!diff_statgrp_push(state, data))
+				return false;
+			return true;
+		}
 		if (diff_common_add_diff_stat(view, data, 0))
 			return true;
 		state->reading_diff_stat = false;
+		/* The buffered stat block ends here: group and emit it. */
+		if (state->stat_group && !diff_statgrp_flush(view, state))
+			return false;
 
 	} else if (type == LINE_DIFF_START) {
 		state->reading_diff_stat = true;
@@ -752,8 +1210,13 @@ diff_find_header_from_stat(struct view *view, struct line *line)
 	if (line->type == LINE_DIFF_STAT) {
 		int file_number = 0;
 
-		while (view_has_line(view, line) && line->type == LINE_DIFF_STAT) {
-			file_number++;
+		/* Count the stat entries above, skipping the group headers so that
+		 * grouping does not shift the file numbering. */
+		while (view_has_line(view, line) &&
+		       (line->type == LINE_DIFF_STAT ||
+			line->type == LINE_DIFF_STAT_HEADER)) {
+			if (line->type == LINE_DIFF_STAT)
+				file_number++;
 			line--;
 		}
 
@@ -882,6 +1345,9 @@ diff_read(struct view *view, struct buffer *buf, bool force_stop)
 				return false;
 			diff_refine_free(&state->refine);
 		}
+		/* Flush a stat block that was not terminated by a summary line. */
+		if (state->stat_group && !diff_statgrp_flush(view, state))
+			return false;
 
 		if (!diff_done_highlight(state)) {
 			if (!force_stop)

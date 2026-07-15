@@ -1,0 +1,68 @@
+#!/bin/sh
+
+. libtest.sh
+. libgit.sh
+
+export COLUMNS=70
+
+tigrc <<EOF
+set diff-stat-group = yes
+EOF
+
+steps '
+	:save-display diff-stat-group.screen
+'
+
+git_init "$work_dir"
+
+test_setup_work_dir()
+{
+	for path in \
+		packages/server/source/routes.ts \
+		packages/web-application/source/modules/authentication/LoginForm.tsx \
+		packages/web-application/source/modules/authentication/LogoutButton.tsx \
+		packages/web-application/source/modules/dashboard/Overview.tsx \
+		packages/web-application/source/modules/dashboard/widgets/Chart.tsx
+	do
+		mkdir -p -- "$(dirname -- "$path")"
+		printf 'x\n' > "$path"
+		git add -- "$path"
+	done
+	git_commit -m "Add modules"
+}
+
+test_tig show
+
+# At 70 columns the paths do not fit, so the shared "packages/" is lifted into a
+# single group header and elided from the files below it.
+assert_equals 'diff-stat-group.screen' <<EOF
+commit d27af9d6b279392966a22a0fda282e9ac9bbc28a
+Refs: [master]
+Author:     Committer <c.ommitter@example.net>
+AuthorDate: Fri Feb 13 23:31:30 2009 +0000
+Commit:     Committer <c.ommitter@example.net>
+CommitDate: Fri Feb 13 23:31:30 2009 +0000
+
+    Add modules
+---
+[packages/]
+ server/source/routes.ts                                        | 1 +
+ web-application/source/modules/authentication/LoginForm.tsx    | 1 +
+ web-application/source/modules/authentication/LogoutButton.tsx | 1 +
+ web-application/source/modules/dashboard/Overview.tsx          | 1 +
+ web-application/source/modules/dashboard/widgets/Chart.tsx     | 1 +
+ 5 files changed, 5 insertions(+)
+
+diff --git a/packages/server/source/routes.ts b/packages/server/source
+new file mode 100644
+index 0000000..587be6b
+--- /dev/null
++++ b/packages/server/source/routes.ts
+@@ -0,0 +1 @@
++x
+diff --git a/packages/web-application/source/modules/authentication/Lo
+new file mode 100644
+index 0000000..587be6b
+--- /dev/null
+[diff] d27af9d6b279392966a22a0fda282e9ac9bbc28a - line 1 of 52     53%
+EOF

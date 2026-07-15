@@ -301,6 +301,15 @@ The following variables can be set:
 
 	Show +/- signs in the diff view. On by default.
 
+'diff-stat-group' (bool)::
+
+	Group the files in the diffstat under shared-prefix headers, to shorten
+	the paths. The directories common to a run of files are printed once as a
+	`[prefix/]` header (colored with `color diff-stat-header`) and elided from
+	the files below it. Files are grouped only as deeply as needed for the
+	diffstat to fit the view width, and never reordered, so jumping to a file
+	diff keeps working. Off by default.
+
 'ignore-space' (mixed) [no|all|some|at-eol|<bool>]::
 
 	Ignore space changes in diff view. By default no space changes are
