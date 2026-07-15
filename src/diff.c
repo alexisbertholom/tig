@@ -994,7 +994,7 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	struct statgrp_node *root = NULL;
 	struct statgrp_node **groups = NULL;
 	char *line = NULL, *hdr = NULL;
-	bool ok = false;
+	bool ok = false, prior_section = false;
 	size_t i, maxrest = 0, maxfull = 0, maxdisp = 0;
 	size_t width, target, wmin, lo, hi, linecap, hdrcap;
 	int nchosen = 0, ngroups = 0, prev_group = -2;
@@ -1065,22 +1065,35 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	if (!line || !hdr)
 		goto out;
 
+	/*
+	 * Emit the files in git's (alphabetical) order, so they keep their
+	 * position.  A group's files are then contiguous, so its "[prefix/]"
+	 * header is only ever followed by its own files; a blank line separates
+	 * each block (group or run of ungrouped files) from the next.
+	 */
 	for (i = 0; i < g->files; i++) {
 		struct statgrp_file *f = &g->file[i];
 
 		if (f->group != prev_group) {
+			if (prior_section &&
+			    !add_line_text(view, "", LINE_DIFF_STAT_HEADER))
+				goto out;
 			if (f->group >= 0) {
 				snprintf(hdr, hdrcap, "[%s]", groups[f->group]->prefix);
 				if (!add_line_text(view, hdr, LINE_DIFF_STAT_HEADER))
 					goto out;
 			}
 			prev_group = f->group;
+			prior_section = true;
 		}
 		snprintf(line, linecap, " %-*s %s",
 			 (int) maxdisp, f->path + f->disp, f->rest);
 		if (!diff_common_read_diff_stat(view, line))
 			goto out;
 	}
+	/* Separate the last block from the "N files changed" summary. */
+	if (nchosen > 0 && !add_line_text(view, "", LINE_DIFF_STAT_HEADER))
+		goto out;
 	ok = true;
 
 out:
@@ -1210,8 +1223,8 @@ diff_find_header_from_stat(struct view *view, struct line *line)
 	if (line->type == LINE_DIFF_STAT) {
 		int file_number = 0;
 
-		/* Count the stat entries above, skipping the group headers so that
-		 * grouping does not shift the file numbering. */
+		/* Count the stat entries above, skipping the group headers and the
+		 * blank separators so that grouping does not shift the numbering. */
 		while (view_has_line(view, line) &&
 		       (line->type == LINE_DIFF_STAT ||
 			line->type == LINE_DIFF_STAT_HEADER)) {

@@ -3,7 +3,7 @@
 . libtest.sh
 . libgit.sh
 
-export COLUMNS=70
+export COLUMNS=50
 
 tigrc <<EOF
 set diff-stat-group = yes
@@ -18,51 +18,53 @@ git_init "$work_dir"
 test_setup_work_dir()
 {
 	for path in \
-		packages/server/source/routes.ts \
-		packages/web-application/source/modules/authentication/LoginForm.tsx \
-		packages/web-application/source/modules/authentication/LogoutButton.tsx \
-		packages/web-application/source/modules/dashboard/Overview.tsx \
-		packages/web-application/source/modules/dashboard/widgets/Chart.tsx
+		README.md \
+		source/apps/dashboard/components/Overview.tsx \
+		source/apps/dashboard/components/widgets/Chart.tsx \
+		source/apps/dashboard/store/reducers.ts \
+		source/core/api/client.ts \
+		zzz-notes.txt
 	do
 		mkdir -p -- "$(dirname -- "$path")"
 		printf 'x\n' > "$path"
 		git add -- "$path"
 	done
-	git_commit -m "Add modules"
+	git_commit -m "Add dashboard"
 }
 
 test_tig show
 
-# At 70 columns the paths do not fit, so the shared "packages/" is lifted into a
-# single group header and elided from the files below it.
+# At 50 columns the "source/" files are lifted under one header followed only by
+# their own files, and blank lines separate the blocks.  The unprefixed files
+# keep their alphabetical position: README.md stays first, zzz-notes.txt last.
 assert_equals 'diff-stat-group.screen' <<EOF
-commit d27af9d6b279392966a22a0fda282e9ac9bbc28a
+commit c192b5e0c414238a0a5f21ba982819b21d69dd39
 Refs: [master]
 Author:     Committer <c.ommitter@example.net>
 AuthorDate: Fri Feb 13 23:31:30 2009 +0000
 Commit:     Committer <c.ommitter@example.net>
 CommitDate: Fri Feb 13 23:31:30 2009 +0000
 
-    Add modules
+    Add dashboard
 ---
-[packages/]
- server/source/routes.ts                                        | 1 +
- web-application/source/modules/authentication/LoginForm.tsx    | 1 +
- web-application/source/modules/authentication/LogoutButton.tsx | 1 +
- web-application/source/modules/dashboard/Overview.tsx          | 1 +
- web-application/source/modules/dashboard/widgets/Chart.tsx     | 1 +
- 5 files changed, 5 insertions(+)
+ README.md                                   | 1 +
 
-diff --git a/packages/server/source/routes.ts b/packages/server/source
+[source/]
+ apps/dashboard/components/Overview.tsx      | 1 +
+ apps/dashboard/components/widgets/Chart.tsx | 1 +
+ apps/dashboard/store/reducers.ts            | 1 +
+ core/api/client.ts                          | 1 +
+
+ zzz-notes.txt                               | 1 +
+
+ 6 files changed, 6 insertions(+)
+
+diff --git a/README.md b/README.md
 new file mode 100644
 index 0000000..587be6b
 --- /dev/null
-+++ b/packages/server/source/routes.ts
++++ b/README.md
 @@ -0,0 +1 @@
 +x
-diff --git a/packages/web-application/source/modules/authentication/Lo
-new file mode 100644
-index 0000000..587be6b
---- /dev/null
-[diff] d27af9d6b279392966a22a0fda282e9ac9bbc28a - line 1 of 52     53%
+[diff] c192b5e0c414238a0a5f21ba982819b21d69dd3 44%
 EOF
