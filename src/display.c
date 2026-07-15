@@ -84,6 +84,12 @@ open_external_viewer(const char *argv[], const char *dir, bool silent, bool conf
 		ok = io_run_bg(argv, dir);
 
 	} else {
+		/* Neutralize the ncurses SIGTSTP handler; a suspended
+		 * editor signals the whole process group, and on resume
+		 * the handler would repaint tig's screen and reset tty
+		 * modes while the editor still owns the terminal. */
+		void (*tstp_handler)(int) = signal(SIGTSTP, SIG_DFL);
+
 		signal(SIGINT, SIG_IGN);
 		clear();
 		refresh();
@@ -103,6 +109,7 @@ open_external_viewer(const char *argv[], const char *dir, bool silent, bool conf
 		tcsetattr(opt_tty.fd, TCSAFLUSH, opt_tty.attr);
 		set_terminal_modes();
 		signal(SIGINT, SIG_DFL);
+		signal(SIGTSTP, tstp_handler);
 	}
 
 	if (watch_update(WATCH_EVENT_AFTER_COMMAND) && do_refresh) {
