@@ -271,11 +271,56 @@ main_with_graph(struct view *view, struct view_column *column, enum open_flags f
 	       ? column->opt.commit_title.graph : GRAPH_DISPLAY_NO;
 }
 
+/* Set while building the git-log argv so that "load more" (REQ_LOAD_MORE) can
+ * override any -n/--max-count in main-options with an unlimited count. */
+static bool main_load_more;
+
+const char *
+main_load_more_arg(void)
+{
+	return main_load_more ? "--max-count=-1" : "";
+}
+
+/* The commit limit requested via -n/--max-count in main-options, or 0 if none.
+ * Used to tell whether a load stopped short, and to label it in the title. */
+static unsigned long
+main_parse_limit(void)
+{
+	const char **argv = opt_main_options;
+	unsigned long limit = 0;
+	int i;
+
+	for (i = 0; argv && argv[i]; i++) {
+		const char *arg = argv[i];
+		long val = -1;
+
+		if ((!strcmp(arg, "-n") || !strcmp(arg, "--max-count")) && argv[i + 1])
+			val = atol(argv[++i]);
+		else if (!prefixcmp(arg, "-n"))
+			val = atol(arg + 2);
+		else if (!prefixcmp(arg, "--max-count="))
+			val = atol(arg + STRING_SIZE("--max-count="));
+		else if (arg[0] == '-' && arg[1] >= '1' && arg[1] <= '9')
+			val = atol(arg + 1);
+
+		if (val > 0)
+			limit = val;
+	}
+	return limit;
+}
+
 static enum status_code
 main_open(struct view *view, enum open_flags flags)
 {
+	struct main_state *state = view->private;
 	struct view_column *commit_title_column = get_view_column(view, VIEW_COLUMN_COMMIT_TITLE);
 	enum graph_display graph_display = main_with_graph(view, commit_title_column, flags);
+	/* A fresh open resets "load more"; a reload keeps it so the -n override
+	 * sticks.  view->load_more (not state->) survives because load_view()
+	 * memsets the private state on reload.  The assignment must precede the
+	 * argv below, which reads the global through main_load_more_arg(). */
+	bool load_more = (main_load_more = (flags & OPEN_RELOAD)
+			  ? view->load_more : (view->load_more = false));
 	const char *pretty_custom_argv[] = {
 		GIT_MAIN_LOG(encoding_arg, commit_order_arg_with_graph(graph_display),
 			"%(mainargs)", "%(cmdlineargs)", "%(revargs)", "%(fileargs)",
@@ -286,7 +331,6 @@ main_open(struct view *view, enum open_flags flags)
 			"%(mainargs)", "%(cmdlineargs)", "%(revargs)", "%(fileargs)",
 			show_notes_arg())
 	};
-	struct main_state *state = view->private;
 	const char **main_argv = pretty_custom_argv;
 	enum watch_trigger changes_triggers = WATCH_NONE;
 
@@ -315,6 +359,10 @@ main_open(struct view *view, enum open_flags flags)
 		if (code != SUCCESS)
 			return code;
 	}
+
+	/* Record the -n limit (if any) so the title can flag a short load and
+	 * REQ_LOAD_MORE knows there is more to load; cleared once loading all. */
+	view->limit = load_more ? 0 : main_parse_limit();
 
 	/* Register watch before changes commits are added to record the
 	 * start. */
@@ -613,6 +661,15 @@ main_request(struct view *view, enum request request, struct line *line)
 	case REQ_REFRESH:
 		load_refs(true);
 		refresh_view(view);
+		break;
+
+	case REQ_LOAD_MORE:
+		if (!view->limit) {
+			report("All commits are already loaded");
+			break;
+		}
+		view->load_more = true;
+		reload_view(view);
 		break;
 
 	case REQ_PARENT:

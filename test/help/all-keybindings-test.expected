@@ -78,6 +78,8 @@ Searching
   <Down>, <Ctrl-N>, <Ctrl-J> find-next           Find next search match
     <Up>, <Ctrl-P>, <Ctrl-K> find-prev           Find previous search match
 [-] main bindings
+View manipulation
+                           + load-more          Load all commits past the -n limit
 Option toggling:
                            G :toggle commit-title-graph
                            F :toggle commit-title-refs
@@ -154,6 +156,4 @@ Toggle keys (enter: o <key>):
 
 
 
-
-
-[help] - line 2 of 150                                                                          100%
+[help] - line 2 of 152                                                                          100%

@@ -58,6 +58,7 @@ typedef struct view_column *view_settings;
 	_(log_options,			const char **,		VIEW_LOG_LIKE) \
 	_(log_view,			view_settings,		VIEW_NO_FLAGS) \
 	_(reflog_view,			view_settings,		VIEW_NO_FLAGS) \
+	_(loading_indicator,		bool,			VIEW_NO_FLAGS) \
 	_(mailmap,			bool,			VIEW_DIFF_LIKE | VIEW_LOG_LIKE) \
 	_(main_options,			const char **,		VIEW_LOG_LIKE) \
 	_(main_view,			view_settings,		VIEW_NO_FLAGS) \
@@ -202,6 +203,7 @@ const char *ignore_space_arg();
 const char *commit_order_arg();
 const char *commit_order_arg_with_graph(enum graph_display graph_display);
 const char *log_custom_pretty_arg();
+const char *main_load_more_arg(void);
 const char *use_mailmap_arg();
 const char *diff_context_arg();
 const char *diff_prefix_arg();

@@ -54,7 +54,7 @@
 
 #define GIT_MAIN_LOG(encoding_arg, commit_order_arg, mainargs, diffargs, revargs, fileargs, show_notes_arg, pretty_arg) \
 	"git", "log", (encoding_arg), \
-		(commit_order_arg), (mainargs), (diffargs), (revargs), "--date=raw", "--parents", \
+		(commit_order_arg), (mainargs), main_load_more_arg(), (diffargs), (revargs), "--date=raw", "--parents", \
 		"--no-color", (show_notes_arg), (pretty_arg), "--", (fileargs), NULL
 
 #define GIT_MAIN_LOG_RAW(encoding_arg, commit_order_arg, mainargs, diffargs, revargs, fileargs, show_notes_arg) \

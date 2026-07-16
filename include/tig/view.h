@@ -137,6 +137,8 @@ struct view {
 	/* Buffering */
 	size_t lines;		/* Total number of lines */
 	struct line *line;	/* Line index */
+	unsigned long limit;	/* Commit limit (-n) if the load stopped short, else 0 */
+	bool load_more;		/* Override the -n limit and load every commit on the next reload. */
 
 	/* Number of lines with custom status, not to be counted in the
 	 * view title. */

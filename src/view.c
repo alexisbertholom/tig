@@ -688,9 +688,6 @@ update_view_title(struct view *view)
 {
 	WINDOW *window = view->title;
 	unsigned int view_lines, lines;
-	int update_increment = view_has_flags(view, VIEW_LOG_LIKE | VIEW_GREP_LIKE)
-			       ? 100
-			       : view_has_flags(view, VIEW_DIFF_LIKE) ? 10 : 1;
 
 	assert(view_is_displayed(view));
 
@@ -708,19 +705,25 @@ update_view_title(struct view *view)
 
 	if (!view_has_flags(view, VIEW_CUSTOM_STATUS) && view->line != NULL) {
 		struct line *line = &view->line[view->pos.lineno];
+		size_t count = view->lines - view->custom_lines;
+
 		if (view_has_line(view, line) && line->lineno) {
-			wprintw(window, " - %s %u of %zu",
-						   view->ops->type,
-						   line->lineno,
-						   MAX(line->lineno,
-						       view->pipe
-						       ? update_increment *
-							 (size_t) ((view->lines - view->custom_lines) / update_increment)
-						       : view->lines - view->custom_lines));
+			if (view->pipe)
+				/* Still reading: the total is not yet known. */
+				wprintw(window, " - %s %u of [loading...]",
+					view->ops->type, line->lineno);
+			else if (view->limit && count >= view->limit)
+				/* Stopped short at the -n limit; more can be loaded. */
+				wprintw(window, " - %s %u of %lu+. Press '%s' to load more",
+					view->ops->type, line->lineno, view->limit,
+					get_view_key(view, REQ_LOAD_MORE));
+			else
+				wprintw(window, " - %s %u of %zu",
+					view->ops->type, line->lineno, count);
 		}
 	}
 
-	if (view->pipe) {
+	if (opt_loading_indicator && view->pipe) {
 		long long secs = (long long) difftime(time(NULL), view->start_time);
 
 		/* Three git seconds are a long time ... */

@@ -136,6 +136,7 @@ set mailmap			= yes		# Use .mailmap to show canonical name and email address?
 set start-on-head		= no		# Start with cursor on HEAD commit?
 set refresh-mode		= auto		# Enum: manual, auto, after-command, periodic
 set refresh-interval		= 10		# Interval in seconds between refreshes
+set loading-indicator		= yes		# Show the "loading Ns" message while a view loads?
 set ignore-case			= no		# Enum: no, yes, smart-case
 						# Ignore case when searching?
 set wrap-search			= yes		# Wrap around to top/bottom of view when searching?
@@ -261,6 +262,7 @@ bind diff	@	:/^@@			# Jump to next (c)hunk
 bind diff	[	:toggle diff-context -1	# Decrease the diff context
 bind diff	]	:toggle diff-context +1	# Increase the diff context
 bind pager	@	:/^@@			# Jump to next (c)hunk
+bind main	+	load-more		# Load all commits past the -n limit
 bind main	H	:goto HEAD		# Jump to HEAD commit
 bind main	G	:toggle commit-title-graph # Toggle revision graph visualization
 bind main	F	:toggle commit-title-refs  # Toggle reference display (tags/branches)

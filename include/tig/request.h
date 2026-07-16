@@ -34,6 +34,7 @@
 	REQ_(PARENT,		"Move to parent"), \
 	REQ_(VIEW_NEXT,		"Move focus to the next view"), \
 	REQ_(REFRESH,		"Reload and refresh view"), \
+	REQ_(LOAD_MORE,		"Load all commits past the -n limit"), \
 	REQ_(MAXIMIZE,		"Maximize the current view"), \
 	REQ_(VIEW_CLOSE,	"Close the current view"), \
 	REQ_(VIEW_CLOSE_NO_QUIT,	"Close the current view without quitting"), \
