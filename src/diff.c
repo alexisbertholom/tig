@@ -692,6 +692,9 @@ diff_refine_push(struct diff_state *state, const char *data, enum line_type type
 /* A group is "balanced" when its longest residual is at most RATIO10/10 times
  * the prefix it elides; grouping keeps descending until it is. */
 #define STATGRP_RATIO10 13
+/* An ungrouped file gets its own single-file "[prefix/]" header only when the
+ * prefix it would elide is longer than this, so trivial prefixes are left be. */
+#define STATGRP_MIN_ELIDE 4
 
 struct statgrp_file {
 	char *text;		/* original stat line */
@@ -970,6 +973,39 @@ statgrp_count_chosen(struct statgrp_node *node)
 	return n;
 }
 
+/* Length of the longest directory prefix (ending at a '/') common to a and b. */
+static size_t
+statgrp_common_dir(const char *a, const char *b)
+{
+	size_t i, slash = 0;
+
+	for (i = 0; a[i] && a[i] == b[i]; i++)
+		if (a[i] == '/')
+			slash = i + 1;
+	return slash;
+}
+
+/* The directory boundary nearest the middle of the path, so that the elided
+ * prefix and the shown residual are about the same length. */
+static size_t
+statgrp_half_cut(const char *path, size_t len)
+{
+	size_t i, best = 0;
+	long target = (long) len / 2, bestd = -1;
+
+	for (i = 0; i < len; i++)
+		if (path[i] == '/') {
+			long b = (long) i + 1;
+			long d = b > target ? b - target : target - b;
+
+			if (bestd < 0 || d < bestd) {
+				bestd = d;
+				best = i + 1;
+			}
+		}
+	return best;
+}
+
 static void
 statgrp_assign(struct statgrp_node *node, struct statgrp_file *files,
 	       int cur, size_t curprefix,
@@ -1032,7 +1068,8 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	bool ok = false, prior_section = false;
 	size_t i, maxrest = 0, maxfull = 0, maxdisp = 0;
 	size_t width, target, linecap, hdrcap;
-	int nchosen = 0, ngroups = 0, prev_group = -2;
+	int nchosen = 0, ngroups = 0;
+	long prev_block = -2;
 
 	if (!g || g->files == 0) {
 		diff_statgrp_free(&state->stat_group);
@@ -1073,6 +1110,33 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	}
 	statgrp_assign(root, g->file, -1, 0, groups, &ngroups);
 
+	/*
+	 * Shorten the ungrouped files too: elide the longest prefix they share
+	 * with any other file (redundant, so recognisable from its neighbours),
+	 * or, when nothing is shared, roughly the first half of the path.  It is
+	 * shown with a "..." marker, and only kept when it actually shortens.
+	 */
+	for (i = 0; i < g->files; i++) {
+		struct statgrp_file *f = &g->file[i];
+		size_t best = 0, j;
+
+		if (f->group >= 0)
+			continue;
+		for (j = 0; j < g->files; j++) {
+			size_t c;
+
+			if (j == i)
+				continue;
+			c = statgrp_common_dir(f->path, g->file[j].path);
+			if (c > best)
+				best = c;
+		}
+		if (best == 0)
+			best = statgrp_half_cut(f->path, f->pathlen);
+		if (best > STATGRP_MIN_ELIDE)
+			f->disp = best;
+	}
+
 	for (i = 0; i < g->files; i++) {
 		size_t disp = g->file[i].pathlen - g->file[i].disp;
 
@@ -1089,23 +1153,35 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 
 	/*
 	 * Emit the files in git's (alphabetical) order, so they keep their
-	 * position.  A group's files are then contiguous, so its "[prefix/]"
-	 * header is only ever followed by its own files; a blank line separates
-	 * each block (group or run of ungrouped files) from the next.
+	 * position, each block headed by its "[prefix/]" and separated from the
+	 * next by a blank line.  A real group heads its run of files; an
+	 * ungrouped file with an elided prefix heads a block of its own (a group
+	 * of one); the remaining ungrouped files share a plain, header-less block.
 	 */
 	for (i = 0; i < g->files; i++) {
 		struct statgrp_file *f = &g->file[i];
+		long block;
 
-		if (f->group != prev_group) {
+		if (f->group >= 0)
+			block = f->group;		/* real group */
+		else if (f->disp > 0)
+			block = (long) nchosen + (long) i;	/* own single-file group */
+		else
+			block = -1;			/* plain, header-less */
+
+		if (block != prev_block) {
 			if (prior_section &&
 			    !add_line_text(view, "", LINE_DIFF_STAT_HEADER))
 				goto out;
-			if (f->group >= 0) {
+			if (f->group >= 0)
 				snprintf(hdr, hdrcap, "[%s]", groups[f->group]->prefix);
+			else if (f->disp > 0)
+				snprintf(hdr, hdrcap, "[%.*s]", (int) f->disp, f->path);
+			if (f->group >= 0 || f->disp > 0) {
 				if (!add_line_text(view, hdr, LINE_DIFF_STAT_HEADER))
 					goto out;
 			}
-			prev_group = f->group;
+			prev_block = block;
 			prior_section = true;
 		}
 		snprintf(line, linecap, " %-*s %s",

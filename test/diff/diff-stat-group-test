@@ -42,9 +42,9 @@ test_tig show
 
 # At 50 columns the dashboard files are lifted under a "[source/apps/dashboard/]"
 # header followed only by their own files, with blank lines between blocks. The
-# unprefixed files keep their alphabetical position (README.md first, zzz last),
-# and core/api/client.ts -- which shares only the shallow "source/" -- is left
-# ungrouped rather than dragging the group up to it.
+# unprefixed files keep their alphabetical position (README.md first, zzz last).
+# client.ts is not dragged into the dashboard group (it shares only the shallow
+# "source/"), but that shared prefix still heads a single-file group of its own.
 assert_equals 'diff-stat-group.screen' <<EOF
 commit c192b5e0c414238a0a5f21ba982819b21d69dd39
 Refs: [master]
@@ -62,7 +62,9 @@ CommitDate: Fri Feb 13 23:31:30 2009 +0000
  components/widgets/Chart.tsx | 1 +
  store/reducers.ts            | 1 +
 
- source/core/api/client.ts    | 1 +
+[source/]
+ core/api/client.ts           | 1 +
+
  zzz-notes.txt                | 1 +
 
  6 files changed, 6 insertions(+)
@@ -72,9 +74,7 @@ new file mode 100644
 index 0000000..587be6b
 --- /dev/null
 +++ b/README.md
-@@ -0,0 +1 @@
-+x
-[diff] c192b5e0c414238a0a5f21ba982819b21d69dd3 44%
+[diff] c192b5e0c414238a0a5f21ba982819b21d69dd3 43%
 EOF
 
 assert_equals 'diff-stat-group-resolve.screen' <<EOF
