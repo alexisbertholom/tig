@@ -19,6 +19,9 @@ steps '
 	:0
 	:save-display main-with-unstaged-and-staged-split.screen
 
+	# "u" on a diffstat entry now stages just that file; land on the summary
+	# line to stage all the remaining files at once.
+	:/files changed
 	:status-update
 	:save-display main-with-staged.screen
 

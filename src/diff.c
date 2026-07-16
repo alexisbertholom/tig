@@ -28,15 +28,15 @@ static bool diff_highlight_is_internal(void);
  * default budget elides them to ".../"): tig then re-fits them to the view
  * width itself.  Raising --stat-name-width alone has no effect, so --stat-width
  * is raised too, and the +/- graph is capped to keep the tail short. */
-static const char *diff_stat_width_arg(void)
+const char *diff_stat_width_arg(void)
 {
 	return opt_diff_stat_group ? "--stat-width=32767" : "";
 }
-static const char *diff_stat_name_width_arg(void)
+const char *diff_stat_name_width_arg(void)
 {
 	return opt_diff_stat_group ? "--stat-name-width=32767" : "";
 }
-static const char *diff_stat_graph_width_arg(void)
+const char *diff_stat_graph_width_arg(void)
 {
 	return opt_diff_stat_group ? "--stat-graph-width=20" : "";
 }
@@ -1350,6 +1350,15 @@ diff_find_header_from_stat(struct view *view, struct line *line)
 	}
 
 	return NULL;
+}
+
+/* Resolve a diffstat entry (LINE_DIFF_STAT) to the file it stands for. */
+const char *
+diff_stat_pathname(struct view *view, struct line *line, bool old)
+{
+	struct line *header = diff_find_header_from_stat(view, line);
+
+	return header ? diff_get_pathname(view, header, old) : NULL;
 }
 
 enum request

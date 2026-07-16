@@ -26,12 +26,14 @@
 	GIT_DIFF_INITIAL(encoding_arg, "--cached", context_arg, space_arg, "", new_name)
 
 #define GIT_DIFF_STAGED(encoding_arg, context_arg, prefix_arg, space_arg, word_diff_arg, old_name, new_name) \
-	"git", "diff-index", (encoding_arg), "--textconv", "--patch-with-stat", "-C", \
+	"git", "diff-index", (encoding_arg), "--textconv", "--patch-with-stat", \
+		diff_stat_width_arg(), diff_stat_name_width_arg(), diff_stat_graph_width_arg(), "-C", \
 		"--cached", "--diff-filter=ACDMRTXB", DIFF_ARGS, "%(cmdlineargs)", (context_arg), \
 		(prefix_arg), (space_arg), (word_diff_arg), "HEAD", "--", (old_name), (new_name), NULL
 
 #define GIT_DIFF_UNSTAGED(encoding_arg, context_arg, prefix_arg, space_arg, word_diff_arg, old_name, new_name) \
-	"git", "diff-files", (encoding_arg), "--textconv", "--patch-with-stat", "-C", \
+	"git", "diff-files", (encoding_arg), "--textconv", "--patch-with-stat", \
+		diff_stat_width_arg(), diff_stat_name_width_arg(), diff_stat_graph_width_arg(), "-C", \
 		DIFF_ARGS, "%(cmdlineargs)", (context_arg), (prefix_arg), (space_arg), (word_diff_arg), \
 		"--", (old_name), (new_name), NULL
 

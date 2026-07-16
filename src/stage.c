@@ -261,9 +261,61 @@ stage_update_files(struct view *view, enum line_type type)
 }
 
 static bool
+stage_update_stat_file(const char *file)
+{
+	const char *add_argv[] = { "git", "add", "--", file, NULL };
+	const char *reset_argv[] = { "git", "reset", "--quiet", "HEAD", "--", file, NULL };
+	const char *rm_argv[] = { "git", "rm", "--quiet", "--cached", "--", file, NULL };
+	const char **argv;
+
+	if (stage_line_type == LINE_STAT_STAGED)
+		argv = is_initial_commit() ? rm_argv : reset_argv;
+	else
+		argv = add_argv;
+
+	return io_run_bg(argv, repo.exec_dir);
+}
+
+/*
+ * Stage or unstage the whole file(s) behind a diffstat line: one file for a
+ * stat entry, or all of a group's files for its "[prefix/]" header.
+ */
+static bool
+stage_update_stat(struct view *view, struct line *line)
+{
+	bool ok = false;
+
+	if (line->type == LINE_DIFF_STAT_HEADER) {
+		struct line *pos;
+
+		for (pos = line + 1;
+		     view_has_line(view, pos) && pos->type == LINE_DIFF_STAT; pos++) {
+			const char *file = diff_stat_pathname(view, pos, false);
+
+			if (file && stage_update_stat_file(file))
+				ok = true;
+		}
+	} else {
+		const char *file = diff_stat_pathname(view, line, false);
+
+		ok = file && stage_update_stat_file(file);
+	}
+	return ok;
+}
+
+static bool
 stage_update(struct view *view, struct line *line, update_t update_type)
 {
 	struct line *chunk = NULL;
+
+	if (line->type == LINE_DIFF_STAT || line->type == LINE_DIFF_STAT_HEADER) {
+		if (!stage_update_stat(view, line)) {
+			report("Failed to stage the selected file(s)");
+			return false;
+		}
+		watch_apply(&view->watch, WATCH_INDEX);
+		return true;
+	}
 
 	if (!is_initial_commit() && stage_line_type != LINE_STAT_UNTRACKED)
 		chunk = find_prev_line_by_type(view, line, LINE_DIFF_CHUNK);

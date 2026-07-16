@@ -50,6 +50,11 @@ bool diff_done_highlight(struct diff_state *state);
 
 unsigned int diff_get_lineno(struct view *view, struct line *line, bool old);
 const char *diff_get_pathname(struct view *view, struct line *line, bool old);
+const char *diff_stat_pathname(struct view *view, struct line *line, bool old);
+
+const char *diff_stat_width_arg(void);
+const char *diff_stat_name_width_arg(void);
+const char *diff_stat_graph_width_arg(void);
 
 extern struct view diff_view;
 
