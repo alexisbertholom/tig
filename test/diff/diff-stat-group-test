@@ -11,6 +11,12 @@ EOF
 
 steps '
 	:save-display diff-stat-group.screen
+
+	# Move onto a grouped stat line (Overview.tsx) and confirm it still
+	# resolves to the right file despite the header and blank-line separators.
+	:13
+	:!echo %(file)
+	:save-display diff-stat-group-resolve.screen
 '
 
 git_init "$work_dir"
@@ -34,9 +40,11 @@ test_setup_work_dir()
 
 test_tig show
 
-# At 50 columns the "source/" files are lifted under one header followed only by
-# their own files, and blank lines separate the blocks.  The unprefixed files
-# keep their alphabetical position: README.md stays first, zzz-notes.txt last.
+# At 50 columns the dashboard files are lifted under a "[source/apps/dashboard/]"
+# header followed only by their own files, with blank lines between blocks. The
+# unprefixed files keep their alphabetical position (README.md first, zzz last),
+# and core/api/client.ts -- which shares only the shallow "source/" -- is left
+# ungrouped rather than dragging the group up to it.
 assert_equals 'diff-stat-group.screen' <<EOF
 commit c192b5e0c414238a0a5f21ba982819b21d69dd39
 Refs: [master]
@@ -47,15 +55,15 @@ CommitDate: Fri Feb 13 23:31:30 2009 +0000
 
     Add dashboard
 ---
- README.md                                   | 1 +
+ README.md                    | 1 +
 
-[source/]
- apps/dashboard/components/Overview.tsx      | 1 +
- apps/dashboard/components/widgets/Chart.tsx | 1 +
- apps/dashboard/store/reducers.ts            | 1 +
- core/api/client.ts                          | 1 +
+[source/apps/dashboard/]
+ components/Overview.tsx      | 1 +
+ components/widgets/Chart.tsx | 1 +
+ store/reducers.ts            | 1 +
 
- zzz-notes.txt                               | 1 +
+ source/core/api/client.ts    | 1 +
+ zzz-notes.txt                | 1 +
 
  6 files changed, 6 insertions(+)
 
@@ -67,4 +75,36 @@ index 0000000..587be6b
 @@ -0,0 +1 @@
 +x
 [diff] c192b5e0c414238a0a5f21ba982819b21d69dd3 44%
+EOF
+
+assert_equals 'diff-stat-group-resolve.screen' <<EOF
+source/apps/dashboard/components/Overview.tsx
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[pager] echo source/apps/dashboard/components 100%
 EOF

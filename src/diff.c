@@ -689,7 +689,9 @@ diff_refine_push(struct diff_state *state, const char *data, enum line_type type
  */
 
 #define STATGRP_MIN_FILES 2
-#define STATGRP_INF (1 << 28)
+/* A group is "balanced" when its longest residual is at most RATIO10/10 times
+ * the prefix it elides; grouping keeps descending until it is. */
+#define STATGRP_RATIO10 13
 
 struct statgrp_file {
 	char *text;		/* original stat line */
@@ -863,64 +865,97 @@ statgrp_compute(struct statgrp_node *node, struct statgrp_file *files)
 	}
 }
 
-/* Minimum number of headers so that every file under `node` fits `width`. */
-static int
-statgrp_solve(struct statgrp_node *node, size_t width)
+/* Is any file under `node` left ungrouped once its descendants are chosen? */
+static bool
+statgrp_uncovered(struct statgrp_node *node)
 {
-	int split, group = STATGRP_INF;
 	size_t i;
 
-	if (node->maxdirect > width) {
-		split = STATGRP_INF;
-	} else {
-		split = 0;
-		for (i = 0; i < node->kids; i++) {
-			int s = statgrp_solve(node->kid[i], width);
-
-			if (s >= STATGRP_INF) {
-				split = STATGRP_INF;
-				break;
-			}
-			split += s;
-		}
-	}
-	if (node->prefixlen > 0 && node->count >= STATGRP_MIN_FILES &&
-	    node->maxfull - node->prefixlen <= width)
-		group = 1;
-	return group < split ? group : split;
+	if (node->chosen)
+		return false;
+	if (node->nfidx > 0)
+		return true;
+	for (i = 0; i < node->kids; i++)
+		if (statgrp_uncovered(node->kid[i]))
+			return true;
+	return false;
 }
 
-/* Same decision as statgrp_solve, but records where the groups start. */
-static void
-statgrp_mark(struct statgrp_node *node, size_t width)
+/* The longest prefix among the chosen groups in `node`'s subtree. */
+static size_t
+statgrp_max_chosen_prefix(struct statgrp_node *node)
 {
-	int split, group = STATGRP_INF;
+	size_t i, m = node->chosen ? node->prefixlen : 0;
+
+	for (i = 0; i < node->kids; i++) {
+		size_t c = statgrp_max_chosen_prefix(node->kid[i]);
+
+		if (c > m)
+			m = c;
+	}
+	return m;
+}
+
+static void
+statgrp_clear_chosen(struct statgrp_node *node)
+{
 	size_t i;
 
 	node->chosen = false;
-	if (node->maxdirect > width) {
-		split = STATGRP_INF;
-	} else {
-		split = 0;
-		for (i = 0; i < node->kids; i++) {
-			int s = statgrp_solve(node->kid[i], width);
+	for (i = 0; i < node->kids; i++)
+		statgrp_clear_chosen(node->kid[i]);
+}
 
-			if (s >= STATGRP_INF) {
-				split = STATGRP_INF;
-				break;
-			}
-			split += s;
-		}
-	}
-	if (node->prefixlen > 0 && node->count >= STATGRP_MIN_FILES &&
-	    node->maxfull - node->prefixlen <= width)
-		group = 1;
+/*
+ * Choose where the group headers start.  A node becomes a group when its
+ * longest residual is short relative to the prefix it elides (balanced), or
+ * when nothing better can be done deeper (its children are single files).
+ * `width` is the residual budget imposed by the view: a group whose residuals
+ * do not fit is split further when possible, so a narrow view groups more.
+ */
+static void
+statgrp_choose(struct statgrp_node *node, size_t width)
+{
+	bool balanced, fits, groupable = false;
+	size_t i;
 
-	if (group != STATGRP_INF && group <= split) {
-		node->chosen = true;		/* group here, do not descend */
-	} else {
+	node->chosen = false;
+	if (node->prefixlen == 0 || node->count < STATGRP_MIN_FILES) {
 		for (i = 0; i < node->kids; i++)
-			statgrp_mark(node->kid[i], width);
+			statgrp_choose(node->kid[i], width);
+		return;
+	}
+
+	balanced = (node->maxfull - node->prefixlen) * 10
+		   <= (size_t) STATGRP_RATIO10 * node->prefixlen;
+	fits = node->maxfull - node->prefixlen <= width;
+	for (i = 0; i < node->kids; i++)
+		if (node->kid[i]->count >= STATGRP_MIN_FILES) {
+			groupable = true;
+			break;
+		}
+
+	if (!groupable || (balanced && fits)) {
+		node->chosen = true;
+		return;
+	}
+
+	for (i = 0; i < node->kids; i++)
+		statgrp_choose(node->kid[i], width);
+
+	/*
+	 * Near cousin: descending stranded a lone file that shares this prefix.
+	 * Pull everything into this node when doing so lengthens the grouped
+	 * files (each by pg - prefixlen) less than it shortens the lone one (by
+	 * prefixlen) -- and the result still fits.
+	 */
+	if (fits && statgrp_uncovered(node)) {
+		size_t pg = statgrp_max_chosen_prefix(node);
+
+		if (pg > node->prefixlen && pg - node->prefixlen < node->prefixlen) {
+			statgrp_clear_chosen(node);
+			node->chosen = true;
+		}
 	}
 }
 
@@ -996,7 +1031,7 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	char *line = NULL, *hdr = NULL;
 	bool ok = false, prior_section = false;
 	size_t i, maxrest = 0, maxfull = 0, maxdisp = 0;
-	size_t width, target, wmin, lo, hi, linecap, hdrcap;
+	size_t width, target, linecap, hdrcap;
 	int nchosen = 0, ngroups = 0, prev_group = -2;
 
 	if (!g || g->files == 0) {
@@ -1024,24 +1059,11 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 
 	statgrp_compute(root, g->file);
 
-	/* Budget for the name column so that " <name> <graph>" fits the view. */
+	/* Residual budget for the name column so that " <name> <graph>" fits the
+	 * view; balance grouping happens within it, a narrower view groups more. */
 	width = view->width > 0 ? (size_t) view->width : 80;
 	target = width > maxrest + 2 ? width - maxrest - 2 : 1;
-
-	/* Smallest width that fits everything, so we never group more than the
-	 * narrowest feasible layout requires. */
-	lo = 1;
-	hi = maxfull > 0 ? maxfull : 1;
-	while (lo < hi) {
-		size_t mid = (lo + hi) / 2;
-
-		if (statgrp_solve(root, mid) < STATGRP_INF)
-			hi = mid;
-		else
-			lo = mid + 1;
-	}
-	wmin = lo;
-	statgrp_mark(root, target < wmin ? wmin : target);
+	statgrp_choose(root, target);
 
 	nchosen = statgrp_count_chosen(root);
 	if (nchosen > 0) {
