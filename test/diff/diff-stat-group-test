@@ -7,14 +7,15 @@ export COLUMNS=50
 
 tigrc <<EOF
 set diff-stat-group = yes
+set line-graphics = utf-8
 EOF
 
 steps '
 	:save-display diff-stat-group.screen
 
-	# Move onto a grouped stat line (Overview.tsx) and confirm it still
-	# resolves to the right file despite the header and blank-line separators.
-	:13
+	# Move onto a nested stat line (Chart.tsx) and confirm it still resolves
+	# to the right file, its path no longer being spelled out in full.
+	:15
 	:!echo %(file)
 	:save-display diff-stat-group-resolve.screen
 '
@@ -40,11 +41,10 @@ test_setup_work_dir()
 
 test_tig show
 
-# At 50 columns the dashboard files are lifted under a "[source/apps/dashboard/]"
-# header followed only by their own files, with blank lines between blocks. The
-# unprefixed files keep their alphabetical position (README.md first, zzz last).
-# client.ts is not dragged into the dashboard group (it shares only the shallow
-# "source/"), but that shared prefix still heads a single-file group of its own.
+# At 50 columns the dashboard files are laid out as a tree under "source/", each
+# directory spelled out once, and a directory holding a single entry folded into
+# it ("apps/dashboard/", "store/reducers.ts").  The files git listed at the root
+# keep their alphabetical place among the trees (README.md first, zzz last).
 assert_equals 'diff-stat-group.screen' <<EOF
 commit c192b5e0c414238a0a5f21ba982819b21d69dd39
 Refs: [master]
@@ -55,18 +55,15 @@ CommitDate: Fri Feb 13 23:31:30 2009 +0000
 
     Add dashboard
 ---
- README.md                    | 1 +
-
-[source/apps/dashboard/]
- components/Overview.tsx      | 1 +
- components/widgets/Chart.tsx | 1 +
- store/reducers.ts            | 1 +
-
-[source/]
- core/api/client.ts           | 1 +
-
- zzz-notes.txt                | 1 +
-
+ README.md                     | 1 +
+ source/
+ ├── apps/dashboard/
+ │   ├── components/
+ │   │   ├── Overview.tsx      | 1 +
+ │   │   └── widgets/Chart.tsx | 1 +
+ │   └── store/reducers.ts     | 1 +
+ └── core/api/client.ts        | 1 +
+ zzz-notes.txt                 | 1 +
  6 files changed, 6 insertions(+)
 
 diff --git a/README.md b/README.md
@@ -74,11 +71,14 @@ new file mode 100644
 index 0000000..587be6b
 --- /dev/null
 +++ b/README.md
-[diff] c192b5e0c414238a0a5f21ba982819b21d69dd3 43%
+@@ -0,0 +1 @@
++x
+diff --git a/source/apps/dashboard/components/Over
+[diff] c192b5e0c414238a0a5f21ba982819b21d69dd3 45%
 EOF
 
 assert_equals 'diff-stat-group-resolve.screen' <<EOF
-source/apps/dashboard/components/Overview.tsx
+source/apps/dashboard/components/widgets/Chart.tsx
 
 
 

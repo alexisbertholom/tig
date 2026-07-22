@@ -126,7 +126,7 @@ set show-notes			= yes		# When non-bool passed as `--show-notes=...` (diff)
 						#                   defaults to `diff-highlight`. Use
 						#                   `internal` for the built-in word refinement.
 set diff-indicator		= yes		# Show diff +/- signs?
-set diff-stat-group		= no		# Group diffstat files under shared-prefix headers?
+set diff-stat-group		= no		# Lay the diffstat out as a directory tree?
 #set blame-options		= -C -C -C	# User-defined options for `tig blame` (git-blame)
 set log-options			= --cc --stat	# User-defined options for `tig log` (git-log)
 #set main-options		= -n 1000	# User-defined options for `tig` (git-log)

@@ -235,6 +235,7 @@ enum status_code load_options(void);
 enum status_code load_git_config(void);
 enum status_code save_options(const char *path);
 const char *format_option_value(const struct option_info *option, char buf[], size_t bufsize);
+bool locale_is_utf8(void);
 
 #endif
 /* vim: set ts=8 sw=8 noexpandtab: */

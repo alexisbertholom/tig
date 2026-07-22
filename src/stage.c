@@ -278,7 +278,7 @@ stage_update_stat_file(const char *file)
 
 /*
  * Stage or unstage the whole file(s) behind a diffstat line: one file for a
- * stat entry, or all of a group's files for its "[prefix/]" header.
+ * stat entry, or a whole subtree for the directory row heading it.
  */
 static bool
 stage_update_stat(struct view *view, struct line *line)
@@ -288,10 +288,16 @@ stage_update_stat(struct view *view, struct line *line)
 	if (line->type == LINE_DIFF_STAT_HEADER) {
 		struct line *pos;
 
+		/* Every entry below the directory, nested ones included. */
 		for (pos = line + 1;
-		     view_has_line(view, pos) && pos->type == LINE_DIFF_STAT; pos++) {
-			const char *file = diff_stat_pathname(view, pos, false);
+		     view_has_line(view, pos) && diff_stat_row_under(view, line, pos);
+		     pos++) {
+			const char *file;
 
+			if (pos->type != LINE_DIFF_STAT)
+				continue;
+
+			file = diff_stat_pathname(view, pos, false);
 			if (file && stage_update_stat_file(file))
 				ok = true;
 		}

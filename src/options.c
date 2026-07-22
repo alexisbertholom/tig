@@ -602,6 +602,20 @@ parse_enum(const char *name, unsigned int *opt, const char *arg,
 		     arg, name, enum_name(map->entries[*opt].name));
 }
 
+/* Is the terminal expecting UTF-8?  Asked when picking the characters to draw
+ * with: "line-graphics = auto" settles on it, and so does anything drawn as
+ * part of a line, where the curses graphics cannot be used. */
+bool
+locale_is_utf8(void)
+{
+	const char *locale;
+
+	return (((locale = getenv("LC_ALL")) && *locale) ||
+		((locale = getenv("LC_CTYPE")) && *locale) ||
+		((locale = getenv("LANG")) && *locale)) &&
+	       (strstr(locale, "UTF") || strstr(locale, "utf"));
+}
+
 static enum status_code
 parse_string(char *opt, const char *arg, size_t optsize)
 {
@@ -686,16 +700,9 @@ parse_option(struct option_info *option, const char *prefix, const char *arg)
 
 	if (!strncmp(option->type, "enum", 4)) {
 		if (!strcmp(name, "line-graphics") && !strcasecmp(arg, "auto")) {
-			const char *locale;
 			int *value = option->value;
 
-			if ((((locale = getenv("LC_ALL")) && *locale) ||
-			     ((locale = getenv("LC_CTYPE")) && *locale) ||
-			     ((locale = getenv("LANG")) && *locale)) &&
-			    (strstr(locale, "UTF") || strstr(locale, "utf")))
-				*value = GRAPHIC_UTF_8;
-			else
-				*value = GRAPHIC_DEFAULT;
+			*value = locale_is_utf8() ? GRAPHIC_UTF_8 : GRAPHIC_DEFAULT;
 			return SUCCESS;
 		} else {
 			const char *type = option->type + STRING_SIZE("enum ");

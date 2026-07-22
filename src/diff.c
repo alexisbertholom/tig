@@ -685,7 +685,8 @@ diff_refine_push(struct diff_state *state, const char *data, enum line_type type
 
 struct diff_stat_row {
 	unsigned long lineno;		/* the view line holding the entry */
-	const char *path;		/* interned, never freed */
+	const char *path;		/* interned, never freed; NULL for a directory */
+	unsigned int depth;		/* how deep in the tree the row sits */
 };
 
 struct diff_stat_rows {
@@ -707,7 +708,8 @@ diff_stat_rows_free(struct diff_stat_rows **rp)
 
 /* Entries are pushed as they are emitted, keeping `row` sorted by line. */
 static bool
-diff_stat_row_push(struct diff_state *state, unsigned long lineno, const char *path)
+diff_stat_row_push(struct diff_state *state, unsigned long lineno,
+		   const char *path, unsigned int depth)
 {
 	struct diff_stat_rows *r = state->stat_rows;
 	struct diff_stat_row *row;
@@ -730,14 +732,15 @@ diff_stat_row_push(struct diff_state *state, unsigned long lineno, const char *p
 	row = &r->row[r->rows++];
 	row->lineno = lineno;
 	row->path = path;
+	row->depth = depth;
 	return true;
 }
 
-/* The path behind a diffstat entry, or NULL when it was not mapped.  Every view
+/* The map entry of a diffstat row, or NULL when it has none.  Every view
  * reading diff content -- diff, stage and pager -- heads its private data with
  * a struct diff_state, so the map is reachable from all of them. */
-static const char *
-diff_stat_row_path(struct view *view, struct line *line)
+static const struct diff_stat_row *
+diff_stat_row_find(struct view *view, struct line *line)
 {
 	struct diff_state *state = view->private;
 	struct diff_stat_rows *r = state ? state->stat_rows : NULL;
@@ -751,7 +754,7 @@ diff_stat_row_path(struct view *view, struct line *line)
 		size_t mid = lo + (hi - lo) / 2;
 
 		if (r->row[mid].lineno == lineno)
-			return r->row[mid].path;
+			return &r->row[mid];
 		if (r->row[mid].lineno < lineno)
 			lo = mid + 1;
 		else
@@ -760,54 +763,68 @@ diff_stat_row_path(struct view *view, struct line *line)
 	return NULL;
 }
 
+/* Does `line` sit below the directory row `header` in the tree? */
+bool
+diff_stat_row_under(struct view *view, struct line *header, struct line *line)
+{
+	const struct diff_stat_row *h = diff_stat_row_find(view, header);
+	const struct diff_stat_row *r = diff_stat_row_find(view, line);
+
+	return h && r && r->depth > h->depth;
+}
+
 /*
- * Diffstat path grouping.
+ * Diffstat path tree.
  *
  * The paths in a diffstat are mostly made of directories shared with the file
  * above, which pushes the interesting part (the file name and the graph) far
- * to the right.  With "set diff-stat-group = yes", the shared directories of a
- * run of files are printed once as a "[prefix/]" header and elided from the
- * files below it:
+ * to the right.  With "set diff-stat-group = yes", the whole stat block is
+ * buffered and laid out as a tree, so that a directory is spelled out once:
  *
- *	[apps/web-client/src/components/]
- *	App.tsx                       | 2 +
- *	common/AppTopBar.tsx          | 8 ++
+ *	 src/
+ *	 ├── components/
+ *	 │   ├── App.tsx        | 2 +
+ *	 │   └── AppTopBar.tsx  | 8 ++
+ *	 └── store/reducers.ts  | 4 +-
  *
- * The whole stat block is buffered, and a prefix trie of the paths is cut so
- * that the number of headers is minimized while every file still fits the view
- * width -- the files are grouped only as deeply as the width forces, and never
- * reordered.  The headers use a dedicated line type so that jumping to a file
- * diff, which counts stat lines by position, keeps landing on the right file.
+ * A directory holding a single entry is folded into it ("store/reducers.ts"):
+ * one row less to read, and one level less of indent for everything below.
+ * The fold stops where the row would no longer fit the view, so a narrow view
+ * trades width for depth.  Renames keep the "{old => new}" form git prints,
+ * which counts as one component, so a directory moved wholesale is one node.
+ *
+ * The directory rows use a line type of their own, skipped when navigating,
+ * and every row is mapped to the path it stands for, so that jumping to a file
+ * diff does not depend on the entries keeping git's order.
  */
 
-#define STATGRP_MIN_FILES 2
-/* A group is "balanced" when its longest residual is at most RATIO10/10 times
- * the prefix it elides; grouping keeps descending until it is. */
-#define STATGRP_RATIO10 13
-/* An ungrouped file gets its own single-file "[prefix/]" header only when the
- * prefix it would elide is longer than this, so trivial prefixes are left be. */
-#define STATGRP_MIN_ELIDE 4
+/* Columns a level of the tree is indented by, glyph included. */
+#define STATGRP_STEP 4
+
+enum statgrp_glyph {
+	STATGRP_BRANCH,		/* an entry, with more to follow */
+	STATGRP_LAST,		/* the last entry of its directory */
+	STATGRP_PIPE,		/* lead-in past a directory with more to come */
+	STATGRP_BLANK,		/* lead-in past the last directory */
+	STATGRP_GLYPHS
+};
+
+static const char *statgrp_utf8[STATGRP_GLYPHS] = { "├── ", "└── ", "│   ", "    " };
+static const char *statgrp_ascii[STATGRP_GLYPHS] = { "|-- ", "`-- ", "|   ", "    " };
 
 struct statgrp_file {
 	char *text;		/* original stat line */
 	char *path;		/* file name (before '|'), trimmed */
 	size_t pathlen;
 	const char *rest;	/* "| <graph>" tail, points into text */
-	int group;		/* index into the chosen groups, or -1 */
-	size_t disp;		/* offset in path where the shown part starts */
 };
 
 struct statgrp_node {
-	char *prefix;			/* full prefix incl trailing '/', "" at root */
-	size_t prefixlen;
+	char *name;			/* component, directories keep their '/' */
+	size_t namelen;
+	int fidx;			/* the entry it stands for, or -1 */
 	struct statgrp_node **kid;
 	size_t kids, kids_alloc;
-	int *fidx;			/* files directly in this directory */
-	size_t nfidx, fidx_alloc;
-	int count;			/* files in the subtree */
-	size_t maxfull;			/* longest path in the subtree */
-	size_t maxdirect;		/* longest path among the direct files */
-	bool chosen;			/* a group starts at this node */
 };
 
 struct diff_stat_group {
@@ -850,7 +867,6 @@ diff_statgrp_push(struct diff_state *state, const char *text)
 	memset(f, 0, sizeof(*f));
 	f->text = copy;
 	f->rest = pipe;
-	f->group = -1;
 
 	start = copy + strspn(copy, " ");
 	end = pipe;
@@ -865,33 +881,83 @@ diff_statgrp_push(struct diff_state *state, const char *text)
 	return true;
 }
 
-/* Did git spell the path out, or is it a rename ("old => new") or a path it
- * truncated ("...")?  Those stand for no single path on disk. */
+/* Did git spell the path out, or did it truncate it ("...")?  A rename is
+ * spelled out, but as both of its paths at once. */
 static bool
 statgrp_full_path(const struct statgrp_file *f)
 {
-	return strstr(f->path, " => ") == NULL &&
-	       prefixcmp(f->path, "...") != 0;
+	return prefixcmp(f->path, "...") != 0;
 }
 
-/* Renames and truncated paths cannot be split into directories either, so they
- * are never grouped. */
-static bool
-statgrp_groupable(const struct statgrp_file *f)
+/*
+ * The path a rename entry ends up at.  git renders a rename as
+ * "pfx{old => new}sfx", eliding what the two paths share, or as "old => new"
+ * when they share nothing; either way the new path is the one the file diff
+ * is headed by.  Returns NULL when the entry is not a rename.
+ */
+static char *
+statgrp_renamed_path(const char *path)
 {
-	return statgrp_full_path(f) && strchr(f->path, '/') != NULL;
+	const char *arrow = strstr(path, " => ");
+	const char *open = strchr(path, '{');
+	const char *close = open ? strchr(open, '}') : NULL;
+	size_t pfx, new, sfx;
+	char *out;
+
+	if (!arrow)
+		return NULL;
+	if (!close || arrow < open || arrow > close)
+		return strdup(arrow + STRING_SIZE(" => "));
+
+	pfx = open - path;
+	arrow += STRING_SIZE(" => ");
+	new = close - arrow;
+	sfx = strlen(close + 1);
+
+	out = malloc(pfx + new + sfx + 1);
+	if (!out)
+		return NULL;
+	memcpy(out, path, pfx);
+	memcpy(out + pfx, arrow, new);
+	memcpy(out + pfx + new, close + 1, sfx + 1);
+	return out;
+}
+
+/* The leading path component of `path`, its '/' included.  A rename stands as
+ * one component of its own, even when the paths it holds have slashes. */
+static size_t
+statgrp_component(const char *path)
+{
+	size_t i;
+
+	for (i = 0; path[i]; i++) {
+		if (path[i] == '{') {
+			const char *close = strchr(path + i, '}');
+
+			if (!close)
+				break;		/* unbalanced, take the rest */
+			i = close - path;
+			continue;
+		}
+		if (path[i] == '/')
+			return i + 1;
+	}
+	return strlen(path);
 }
 
 static struct statgrp_node *
-statgrp_kid(struct statgrp_node *node, const char *prefix, size_t prefixlen)
+statgrp_kid(struct statgrp_node *node, const char *name, size_t namelen, int fidx)
 {
 	struct statgrp_node *n;
 	size_t i;
 
-	for (i = 0; i < node->kids; i++)
-		if (node->kid[i]->prefixlen == prefixlen &&
-		    !memcmp(node->kid[i]->prefix, prefix, prefixlen))
-			return node->kid[i];
+	/* Directories are shared, entries are not: two files never merge. */
+	if (fidx < 0)
+		for (i = 0; i < node->kids; i++)
+			if (node->kid[i]->fidx < 0 &&
+			    node->kid[i]->namelen == namelen &&
+			    !memcmp(node->kid[i]->name, name, namelen))
+				return node->kid[i];
 
 	if (node->kids == node->kids_alloc) {
 		size_t na = node->kids_alloc ? node->kids_alloc * 2 : 4;
@@ -905,14 +971,15 @@ statgrp_kid(struct statgrp_node *node, const char *prefix, size_t prefixlen)
 	n = calloc(1, sizeof(*n));
 	if (!n)
 		return NULL;
-	n->prefix = malloc(prefixlen + 1);
-	if (!n->prefix) {
+	n->name = malloc(namelen + 1);
+	if (!n->name) {
 		free(n);
 		return NULL;
 	}
-	memcpy(n->prefix, prefix, prefixlen);
-	n->prefix[prefixlen] = 0;
-	n->prefixlen = prefixlen;
+	memcpy(n->name, name, namelen);
+	n->name[namelen] = 0;
+	n->namelen = namelen;
+	n->fidx = fidx;
 	node->kid[node->kids++] = n;
 	return n;
 }
@@ -921,208 +988,144 @@ static bool
 statgrp_insert(struct statgrp_node *root, const char *path, int fidx)
 {
 	struct statgrp_node *node = root;
-	size_t i;
 
-	for (i = 0; path[i]; i++)
-		if (path[i] == '/') {
-			node = statgrp_kid(node, path, i + 1);
-			if (!node)
-				return false;
-		}
+	while (*path) {
+		size_t len = statgrp_component(path);
+		bool leaf = path[len - 1] != '/';
 
-	if (node->nfidx == node->fidx_alloc) {
-		size_t na = node->fidx_alloc ? node->fidx_alloc * 2 : 4;
-		int *p = realloc(node->fidx, na * sizeof(*p));
-
-		if (!p)
+		node = statgrp_kid(node, path, len, leaf ? fidx : -1);
+		if (!node)
 			return false;
-		node->fidx = p;
-		node->fidx_alloc = na;
+		path += len;
 	}
-	node->fidx[node->nfidx++] = fidx;
 	return true;
 }
 
-static void
-statgrp_compute(struct statgrp_node *node, struct statgrp_file *files)
-{
-	size_t i;
-
-	node->count = 0;
-	node->maxfull = node->maxdirect = 0;
-	for (i = 0; i < node->nfidx; i++) {
-		size_t l = files[node->fidx[i]].pathlen;
-
-		node->count++;
-		if (l > node->maxfull)
-			node->maxfull = l;
-		if (l > node->maxdirect)
-			node->maxdirect = l;
-	}
-	for (i = 0; i < node->kids; i++) {
-		statgrp_compute(node->kid[i], files);
-		node->count += node->kid[i]->count;
-		if (node->kid[i]->maxfull > node->maxfull)
-			node->maxfull = node->kid[i]->maxfull;
-	}
-}
-
-/* Is any file under `node` left ungrouped once its descendants are chosen? */
-static bool
-statgrp_uncovered(struct statgrp_node *node)
-{
-	size_t i;
-
-	if (node->chosen)
-		return false;
-	if (node->nfidx > 0)
-		return true;
-	for (i = 0; i < node->kids; i++)
-		if (statgrp_uncovered(node->kid[i]))
-			return true;
-	return false;
-}
-
-/* The longest prefix among the chosen groups in `node`'s subtree. */
-static size_t
-statgrp_max_chosen_prefix(struct statgrp_node *node)
-{
-	size_t i, m = node->chosen ? node->prefixlen : 0;
-
-	for (i = 0; i < node->kids; i++) {
-		size_t c = statgrp_max_chosen_prefix(node->kid[i]);
-
-		if (c > m)
-			m = c;
-	}
-	return m;
-}
-
-static void
-statgrp_clear_chosen(struct statgrp_node *node)
-{
-	size_t i;
-
-	node->chosen = false;
-	for (i = 0; i < node->kids; i++)
-		statgrp_clear_chosen(node->kid[i]);
-}
-
 /*
- * Choose where the group headers start.  A node becomes a group when its
- * longest residual is short relative to the prefix it elides (balanced), or
- * when nothing better can be done deeper (its children are single files).
- * `width` is the residual budget imposed by the view: a group whose residuals
- * do not fit is split further when possible, so a narrow view groups more.
+ * Fold a directory holding a single entry into that entry, as long as the row
+ * it makes fits: `names` is what a file row has left for its name, the graph
+ * column taken out, and `width` all a directory row can use.
  */
 static void
-statgrp_choose(struct statgrp_node *node, size_t width)
+statgrp_fold(struct statgrp_node *node, size_t indent, size_t names, size_t width)
 {
-	bool balanced, fits, groupable = false;
 	size_t i;
 
-	node->chosen = false;
-	if (node->prefixlen == 0 || node->count < STATGRP_MIN_FILES) {
-		for (i = 0; i < node->kids; i++)
-			statgrp_choose(node->kid[i], width);
-		return;
-	}
+	while (node->fidx < 0 && node->kids == 1) {
+		struct statgrp_node *kid = node->kid[0];
+		size_t len = node->namelen + kid->namelen;
+		char *name;
 
-	balanced = (node->maxfull - node->prefixlen) * 10
-		   <= (size_t) STATGRP_RATIO10 * node->prefixlen;
-	fits = node->maxfull - node->prefixlen <= width;
-	for (i = 0; i < node->kids; i++)
-		if (node->kid[i]->count >= STATGRP_MIN_FILES) {
-			groupable = true;
+		if (indent + len > (kid->fidx >= 0 ? names : width))
 			break;
-		}
 
-	if (!groupable || (balanced && fits)) {
-		node->chosen = true;
-		return;
+		name = realloc(node->name, len + 1);
+		if (!name)
+			break;
+		memcpy(name + node->namelen, kid->name, kid->namelen + 1);
+		node->name = name;
+		node->namelen = len;
+		node->fidx = kid->fidx;
+
+		free(node->kid);
+		node->kid = kid->kid;
+		node->kids = kid->kids;
+		node->kids_alloc = kid->kids_alloc;
+		free(kid->name);
+		free(kid);
 	}
 
 	for (i = 0; i < node->kids; i++)
-		statgrp_choose(node->kid[i], width);
-
-	/*
-	 * Near cousin: descending stranded a lone file that shares this prefix.
-	 * Pull everything into this node when doing so lengthens the grouped
-	 * files (each by pg - prefixlen) less than it shortens the lone one (by
-	 * prefixlen) -- and the result still fits.
-	 */
-	if (fits && statgrp_uncovered(node)) {
-		size_t pg = statgrp_max_chosen_prefix(node);
-
-		if (pg > node->prefixlen && pg - node->prefixlen < node->prefixlen) {
-			statgrp_clear_chosen(node);
-			node->chosen = true;
-		}
-	}
+		statgrp_fold(node->kid[i], indent + STATGRP_STEP, names, width);
 }
 
-static int
-statgrp_count_chosen(struct statgrp_node *node)
+/* The columns the widest file row takes up, indent and name. */
+static size_t
+statgrp_name_width(struct statgrp_node *node, size_t depth)
 {
-	int n = node->chosen ? 1 : 0;
+	size_t i, max = node->fidx >= 0 ? depth * STATGRP_STEP + node->namelen : 0;
+
+	for (i = 0; i < node->kids; i++) {
+		size_t w = statgrp_name_width(node->kid[i], depth + 1);
+
+		if (w > max)
+			max = w;
+	}
+	return max;
+}
+
+struct statgrp_draw {
+	struct view *view;
+	struct diff_state *state;
+	struct statgrp_file *file;
+	const char **glyph;
+	char *pfx;			/* lead-in of the level being drawn */
+	size_t pfxlen, pfxcap;
+	char *line;
+	size_t linecap;
+	size_t names;			/* width of the name column */
+};
+
+static bool
+statgrp_pfx_push(struct statgrp_draw *d, const char *seg)
+{
+	size_t len = strlen(seg);
+
+	if (d->pfxlen + len + 1 > d->pfxcap) {
+		size_t na = (d->pfxlen + len + 1) * 2;
+		char *p = realloc(d->pfx, na);
+
+		if (!p)
+			return false;
+		d->pfx = p;
+		d->pfxcap = na;
+	}
+	memcpy(d->pfx + d->pfxlen, seg, len + 1);
+	d->pfxlen += len;
+	return true;
+}
+
+static bool
+statgrp_draw_node(struct statgrp_draw *d, struct statgrp_node *node,
+		  size_t depth, bool last)
+{
+	const char *glyph = depth ? d->glyph[last ? STATGRP_LAST : STATGRP_BRANCH] : "";
+	size_t cols = depth * STATGRP_STEP + node->namelen;
+	size_t saved = d->pfxlen;
+	struct line *row;
+	const char *path = NULL;
+	char *renamed = NULL;
 	size_t i;
 
-	for (i = 0; i < node->kids; i++)
-		n += statgrp_count_chosen(node->kid[i]);
-	return n;
-}
+	if (node->fidx >= 0) {
+		struct statgrp_file *f = &d->file[node->fidx];
 
-/* Length of the longest directory prefix (ending at a '/') common to a and b. */
-static size_t
-statgrp_common_dir(const char *a, const char *b)
-{
-	size_t i, slash = 0;
+		snprintf(d->line, d->linecap, " %s%s%s%*s %s",
+			 d->pfx, glyph, node->name,
+			 (int) (d->names > cols ? d->names - cols : 0), "", f->rest);
+		row = diff_common_read_diff_stat(d->view, d->line);
 
-	for (i = 0; a[i] && a[i] == b[i]; i++)
-		if (a[i] == '/')
-			slash = i + 1;
-	return slash;
-}
-
-/* The directory boundary nearest the middle of the path, so that the elided
- * prefix and the shown residual are about the same length. */
-static size_t
-statgrp_half_cut(const char *path, size_t len)
-{
-	size_t i, best = 0;
-	long target = (long) len / 2, bestd = -1;
-
-	for (i = 0; i < len; i++)
-		if (path[i] == '/') {
-			long b = (long) i + 1;
-			long d = b > target ? b - target : target - b;
-
-			if (bestd < 0 || d < bestd) {
-				bestd = d;
-				best = i + 1;
-			}
+		if (statgrp_full_path(f)) {
+			renamed = statgrp_renamed_path(f->path);
+			path = get_path(renamed ? renamed : f->path);
+			free(renamed);
 		}
-	return best;
-}
-
-static void
-statgrp_assign(struct statgrp_node *node, struct statgrp_file *files,
-	       int cur, size_t curprefix,
-	       struct statgrp_node **groups, int *ngroups)
-{
-	size_t i;
-
-	if (node->chosen) {
-		cur = (*ngroups)++;
-		curprefix = node->prefixlen;
-		groups[cur] = node;
+	} else {
+		snprintf(d->line, d->linecap, " %s%s%s", d->pfx, glyph, node->name);
+		row = add_line_text(d->view, d->line, LINE_DIFF_STAT_HEADER);
 	}
-	for (i = 0; i < node->nfidx; i++) {
-		files[node->fidx[i]].group = cur;
-		files[node->fidx[i]].disp = cur >= 0 ? curprefix : 0;
-	}
+
+	if (!row || !diff_stat_row_push(d->state, row - d->view->line, path, depth))
+		return false;
+
+	if (depth && !statgrp_pfx_push(d, d->glyph[last ? STATGRP_BLANK : STATGRP_PIPE]))
+		return false;
 	for (i = 0; i < node->kids; i++)
-		statgrp_assign(node->kid[i], files, cur, curprefix, groups, ngroups);
+		if (!statgrp_draw_node(d, node->kid[i], depth + 1, i + 1 == node->kids))
+			return false;
+	d->pfx[d->pfxlen = saved] = 0;
+
+	return true;
 }
 
 static void
@@ -1135,8 +1138,7 @@ statgrp_free_node(struct statgrp_node *node)
 	for (i = 0; i < node->kids; i++)
 		statgrp_free_node(node->kid[i]);
 	free(node->kid);
-	free(node->fidx);
-	free(node->prefix);
+	free(node->name);
 	free(node);
 }
 
@@ -1157,19 +1159,27 @@ diff_statgrp_free(struct diff_stat_group **gp)
 	*gp = NULL;
 }
 
+/* The tree is drawn with characters of the line itself, where the curses
+ * graphics of "line-graphics = default" have no place: fall back on UTF-8 when
+ * the locale allows it, as "auto" does, and on ASCII otherwise. */
+static const char **
+statgrp_glyphs(void)
+{
+	if (opt_line_graphics == GRAPHIC_ASCII)
+		return statgrp_ascii;
+	if (opt_line_graphics == GRAPHIC_UTF_8 || locale_is_utf8())
+		return statgrp_utf8;
+	return statgrp_ascii;
+}
+
 static bool
 diff_statgrp_flush(struct view *view, struct diff_state *state)
 {
 	struct diff_stat_group *g = state->stat_group;
 	struct statgrp_node *root = NULL;
-	struct statgrp_node **groups = NULL;
-	struct line *stat;
-	char *line = NULL, *hdr = NULL;
-	bool ok = false, prior_section = false;
-	size_t i, maxrest = 0, maxfull = 0, maxdisp = 0;
-	size_t width, target, linecap, hdrcap;
-	int nchosen = 0, ngroups = 0;
-	long prev_block = -2;
+	struct statgrp_draw draw = { view, state, NULL, statgrp_glyphs() };
+	size_t i, maxrest = 0, maxpath = 0, width, names;
+	bool ok = false;
 
 	if (!g || g->files == 0) {
 		diff_statgrp_free(&state->stat_group);
@@ -1179,8 +1189,9 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	root = calloc(1, sizeof(*root));
 	if (!root)
 		goto out;
-	root->prefix = strdup("");
-	if (!root->prefix)
+	root->fidx = -1;
+	root->name = strdup("");
+	if (!root->name)
 		goto out;
 
 	for (i = 0; i < g->files; i++) {
@@ -1188,126 +1199,50 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 
 		if (strlen(f->rest) > maxrest)
 			maxrest = strlen(f->rest);
-		if (f->pathlen > maxfull)
-			maxfull = f->pathlen;
-		if (statgrp_groupable(f) && !statgrp_insert(root, f->path, (int) i))
+		if (f->pathlen > maxpath)
+			maxpath = f->pathlen;
+		if (!statgrp_insert(root, f->path, (int) i))
 			goto out;
 	}
 
-	statgrp_compute(root, g->file);
-
-	/* Residual budget for the name column so that " <name> <graph>" fits the
-	 * view; balance grouping happens within it, a narrower view groups more. */
+	/* What a file row has left for its name once the graph column is in. */
 	width = view->width > 0 ? (size_t) view->width : 80;
-	target = width > maxrest + 2 ? width - maxrest - 2 : 1;
-	statgrp_choose(root, target);
+	names = width > maxrest + 2 ? width - maxrest - 2 : 1;
 
-	nchosen = statgrp_count_chosen(root);
-	if (nchosen > 0) {
-		groups = calloc(nchosen, sizeof(*groups));
-		if (!groups)
-			goto out;
+	/* The entries git listed at the root head a tree of their own, drawn
+	 * from the first column, so each of them starts the walk over. */
+	for (i = 0; i < root->kids; i++) {
+		size_t w;
+
+		statgrp_fold(root->kid[i], 0, names, width);
+		w = statgrp_name_width(root->kid[i], 0);
+		if (w > draw.names)
+			draw.names = w;
 	}
-	statgrp_assign(root, g->file, -1, 0, groups, &ngroups);
+	if (draw.names > names)
+		draw.names = names;
 
-	/*
-	 * Shorten the ungrouped files too: elide the longest prefix they share
-	 * with any other file (redundant, so recognisable from its neighbours),
-	 * or, when nothing is shared, roughly the first half of the path.  It is
-	 * shown with a "..." marker, and only kept when it actually shortens.
-	 */
-	for (i = 0; i < g->files; i++) {
-		struct statgrp_file *f = &g->file[i];
-		size_t best = 0, j;
-
-		if (f->group >= 0)
-			continue;
-		for (j = 0; j < g->files; j++) {
-			size_t c;
-
-			if (j == i)
-				continue;
-			c = statgrp_common_dir(f->path, g->file[j].path);
-			if (c > best)
-				best = c;
-		}
-		if (best == 0)
-			best = statgrp_half_cut(f->path, f->pathlen);
-		if (best > STATGRP_MIN_ELIDE)
-			f->disp = best;
-	}
-
-	for (i = 0; i < g->files; i++) {
-		size_t disp = g->file[i].pathlen - g->file[i].disp;
-
-		if (disp > maxdisp)
-			maxdisp = disp;
-	}
-
-	linecap = maxdisp + maxrest + 8;
-	line = malloc(linecap);
-	hdrcap = (maxfull > maxrest ? maxfull : maxrest) + 8;
-	hdr = malloc(hdrcap);
-	if (!line || !hdr)
+	/* A row is the lead-in (at most 6 bytes a level, and a level takes at
+	 * least two characters of the path), the name, the padding to the name
+	 * column, and the graph. */
+	draw.file = g->file;
+	draw.linecap = draw.names + maxpath * 6 + maxrest + 32;
+	draw.line = malloc(draw.linecap);
+	draw.pfx = calloc(1, 1);	/* the empty lead-in of the top level */
+	draw.pfxcap = 1;
+	if (!draw.line || !draw.pfx)
 		goto out;
 
-	/*
-	 * Emit the files in git's (alphabetical) order, so they keep their
-	 * position, each block headed by its "[prefix/]" and separated from the
-	 * next by a blank line.  A real group heads its run of files; an
-	 * ungrouped file with an elided prefix heads a block of its own (a group
-	 * of one); the remaining ungrouped files share a plain, header-less block.
-	 */
-	for (i = 0; i < g->files; i++) {
-		struct statgrp_file *f = &g->file[i];
-		long block;
-
-		if (f->group >= 0)
-			block = f->group;		/* real group */
-		else if (f->disp > 0)
-			block = (long) nchosen + (long) i;	/* own single-file group */
-		else
-			block = -1;			/* plain, header-less */
-
-		if (block != prev_block) {
-			if (prior_section &&
-			    !add_line_text(view, "", LINE_DIFF_STAT_HEADER))
-				goto out;
-			if (f->group >= 0)
-				snprintf(hdr, hdrcap, "[%s]", groups[f->group]->prefix);
-			else if (f->disp > 0)
-				snprintf(hdr, hdrcap, "[%.*s]", (int) f->disp, f->path);
-			if (f->group >= 0 || f->disp > 0) {
-				if (!add_line_text(view, hdr, LINE_DIFF_STAT_HEADER))
-					goto out;
-			}
-			prev_block = block;
-			prior_section = true;
-		}
-		snprintf(line, linecap, " %-*s %s",
-			 (int) maxdisp, f->path + f->disp, f->rest);
-		stat = diff_common_read_diff_stat(view, line);
-		if (!stat)
+	/* The tree is walked in the order the entries came in, so the rows stay
+	 * in git's order but for a rename reaching across a directory. */
+	for (i = 0; i < root->kids; i++)
+		if (!statgrp_draw_node(&draw, root->kid[i], 0, i + 1 == root->kids))
 			goto out;
-
-		/* Map the entry to its file, the path being no longer whole. */
-		if (statgrp_full_path(f)) {
-			const char *path = get_path(f->path);
-
-			if (path &&
-			    !diff_stat_row_push(state, stat - view->line, path))
-				goto out;
-		}
-	}
-	/* Separate the last block from the "N files changed" summary. */
-	if (nchosen > 0 && !add_line_text(view, "", LINE_DIFF_STAT_HEADER))
-		goto out;
 	ok = true;
 
 out:
-	free(line);
-	free(hdr);
-	free(groups);
+	free(draw.line);
+	free(draw.pfx);
 	statgrp_free_node(root);
 	diff_statgrp_free(&state->stat_group);
 	return ok;
@@ -1455,11 +1390,11 @@ static struct line *
 diff_find_header_from_stat(struct view *view, struct line *line)
 {
 	if (line->type == LINE_DIFF_STAT) {
-		const char *path = diff_stat_row_path(view, line);
+		const struct diff_stat_row *row = diff_stat_row_find(view, line);
 		int file_number = 0;
 
-		if (path) {
-			struct line *header = diff_find_header_by_pathname(view, path);
+		if (row && row->path) {
+			struct line *header = diff_find_header_by_pathname(view, row->path);
 
 			if (header)
 				return header;

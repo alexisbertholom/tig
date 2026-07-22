@@ -1,0 +1,114 @@
+#!/bin/sh
+
+. libtest.sh
+. libgit.sh
+
+export COLUMNS=60
+
+tigrc <<EOF
+set diff-stat-group = yes
+set line-graphics = utf-8
+EOF
+
+steps '
+	:save-display diff-stat-group-rename.screen
+
+	# Move onto the entry of a moved file and confirm that it still
+	# resolves to the file diff, which git heads with the new path.
+	:13
+	:!echo %(file)
+	:save-display diff-stat-group-rename-resolve.screen
+'
+
+git_init "$work_dir"
+
+test_setup_work_dir()
+{
+	git config --global diff.renames true
+
+	for path in \
+		src/handlers/auth.ts \
+		src/handlers/users.ts \
+		src/util.ts
+	do
+		mkdir -p -- "$(dirname -- "$path")"
+		printf '%s\n' "content of $path" > "$path"
+		git add -- "$path"
+	done
+	git_commit -m "Add handlers"
+
+	git mv src/handlers src/routes
+	git mv src/util.ts src/helper.ts
+	git_commit -m "Move the handlers"
+}
+
+test_tig show
+
+# git renders a rename as "pfx{old => new}sfx", which stands as one component of
+# the tree: a file moved on its own is one entry, and a directory moved wholesale
+# is one node holding the files that moved with it.
+assert_equals 'diff-stat-group-rename.screen' <<EOF
+commit 0a88fd72652fc74c59e24c178efb370e92c16e52
+Refs: [master]
+Author:     Committer <c.ommitter@example.net>
+AuthorDate: Sun Feb 22 11:53:40 2009 +0000
+Commit:     Committer <c.ommitter@example.net>
+CommitDate: Sun Feb 22 11:53:40 2009 +0000
+
+    Move the handlers
+---
+ src/
+ ├── {util.ts => helper.ts} | 0
+ └── {handlers => routes}/
+     ├── auth.ts            | 0
+     └── users.ts           | 0
+ 3 files changed, 0 insertions(+), 0 deletions(-)
+
+diff --git a/src/util.ts b/src/helper.ts
+similarity index 100%
+rename from src/util.ts
+rename to src/helper.ts
+diff --git a/src/handlers/auth.ts b/src/routes/auth.ts
+similarity index 100%
+rename from src/handlers/auth.ts
+rename to src/routes/auth.ts
+diff --git a/src/handlers/users.ts b/src/routes/users.ts
+similarity index 100%
+rename from src/handlers/users.ts
+rename to src/routes/users.ts
+[diff] 0a88fd72652fc74c59e24c178efb370e92c16e52 - line  100%
+EOF
+
+# The entry is mapped to the path the file ends up at, which is the one git
+# heads the file diff with.
+assert_equals 'diff-stat-group-rename-resolve.screen' <<EOF
+src/routes/auth.ts
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[pager] echo src/routes/auth.ts - line 1 of 1           100%
+EOF

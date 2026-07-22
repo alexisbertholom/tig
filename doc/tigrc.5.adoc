@@ -303,12 +303,14 @@ The following variables can be set:
 
 'diff-stat-group' (bool)::
 
-	Group the files in the diffstat under shared-prefix headers, to shorten
-	the paths. The directories common to a run of files are printed once as a
-	`[prefix/]` header (colored with `color diff-stat-header`) and elided from
-	the files below it. Files are grouped only as deeply as needed for the
-	diffstat to fit the view width, and never reordered, so jumping to a file
-	diff keeps working. Off by default.
+	Lay the diffstat out as a tree, to shorten the paths. Each directory is
+	printed once as a row of its own (colored with `color diff-stat-header`)
+	and elided from the files below it. A directory holding a single entry is
+	folded into it, `src/lib/parse.c` reading as one row, as far as the view
+	width allows. Renames keep the `{old => new}` form git prints them in, so
+	a directory moved wholesale is a single node. The tree is drawn with the
+	characters of the 'line-graphics' option, ASCII unless it is UTF-8 or the
+	locale is. Off by default.
 
 'ignore-space' (mixed) [no|all|some|at-eol|<bool>]::
 
