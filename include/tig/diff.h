@@ -18,6 +18,7 @@
 
 struct diff_refine;
 struct diff_stat_group;
+struct diff_stat_rows;
 
 struct diff_state {
 	bool after_commit_title;
@@ -36,6 +37,7 @@ struct diff_state {
 	struct io view_io;
 	struct diff_refine *refine;
 	struct diff_stat_group *stat_group;
+	struct diff_stat_rows *stat_rows;
 };
 
 enum request diff_common_edit(struct view *view, enum request request, struct line *line);

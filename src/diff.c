@@ -42,6 +42,7 @@ const char *diff_stat_graph_width_arg(void)
 }
 static void diff_refine_free(struct diff_refine **rp);
 static void diff_statgrp_free(struct diff_stat_group **gp);
+static void diff_stat_rows_free(struct diff_stat_rows **rp);
 
 static enum status_code
 diff_open(struct view *view, enum open_flags flags)
@@ -71,9 +72,11 @@ diff_init_highlight(struct view *view, struct diff_state *state)
 {
 	state->highlight = false;
 	state->native_refine = false;
-	/* Discard any buffer left over from a previous, aborted load. */
+	/* Discard any buffer left over from a previous, aborted load, and the
+	 * entry map of the content being replaced. */
 	diff_refine_free(&state->refine);
 	diff_statgrp_free(&state->stat_group);
+	diff_stat_rows_free(&state->stat_rows);
 
 	if (opt_word_diff)
 		return SUCCESS;
@@ -669,6 +672,95 @@ diff_refine_push(struct diff_state *state, const char *data, enum line_type type
 }
 
 /*
+ * Diffstat entry map.
+ *
+ * A diffstat entry is resolved to its file diff by position: the Nth entry
+ * stands for the Nth file of the diff.  That only holds while the entries are
+ * listed in git's order, which grouping the paths is free to give up.  So
+ * remember the path each entry stands for as it is emitted, and look the file
+ * diff up by name instead of by rank.  Entries whose path git did not spell out
+ * in full -- renames and paths it truncated -- are left out of the map and keep
+ * being resolved by position.
+ */
+
+struct diff_stat_row {
+	unsigned long lineno;		/* the view line holding the entry */
+	const char *path;		/* interned, never freed */
+};
+
+struct diff_stat_rows {
+	struct diff_stat_row *row;
+	size_t rows, rows_alloc;
+};
+
+static void
+diff_stat_rows_free(struct diff_stat_rows **rp)
+{
+	struct diff_stat_rows *r = *rp;
+
+	if (!r)
+		return;
+	free(r->row);
+	free(r);
+	*rp = NULL;
+}
+
+/* Entries are pushed as they are emitted, keeping `row` sorted by line. */
+static bool
+diff_stat_row_push(struct diff_state *state, unsigned long lineno, const char *path)
+{
+	struct diff_stat_rows *r = state->stat_rows;
+	struct diff_stat_row *row;
+
+	if (!r) {
+		r = state->stat_rows = calloc(1, sizeof(*r));
+		if (!r)
+			return false;
+	}
+	if (r->rows == r->rows_alloc) {
+		size_t na = r->rows_alloc ? r->rows_alloc * 2 : 16;
+		struct diff_stat_row *p = realloc(r->row, na * sizeof(*p));
+
+		if (!p)
+			return false;
+		r->row = p;
+		r->rows_alloc = na;
+	}
+
+	row = &r->row[r->rows++];
+	row->lineno = lineno;
+	row->path = path;
+	return true;
+}
+
+/* The path behind a diffstat entry, or NULL when it was not mapped.  Every view
+ * reading diff content -- diff, stage and pager -- heads its private data with
+ * a struct diff_state, so the map is reachable from all of them. */
+static const char *
+diff_stat_row_path(struct view *view, struct line *line)
+{
+	struct diff_state *state = view->private;
+	struct diff_stat_rows *r = state ? state->stat_rows : NULL;
+	unsigned long lineno = line - view->line;
+	size_t lo = 0, hi;
+
+	if (!r)
+		return NULL;
+
+	for (hi = r->rows; lo < hi; ) {
+		size_t mid = lo + (hi - lo) / 2;
+
+		if (r->row[mid].lineno == lineno)
+			return r->row[mid].path;
+		if (r->row[mid].lineno < lineno)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return NULL;
+}
+
+/*
  * Diffstat path grouping.
  *
  * The paths in a diffstat are mostly made of directories shared with the file
@@ -773,14 +865,21 @@ diff_statgrp_push(struct diff_state *state, const char *text)
 	return true;
 }
 
-/* Renames ("old => new") and paths git already truncated ("...") cannot be
- * split into directories, so they are never grouped. */
+/* Did git spell the path out, or is it a rename ("old => new") or a path it
+ * truncated ("...")?  Those stand for no single path on disk. */
+static bool
+statgrp_full_path(const struct statgrp_file *f)
+{
+	return strstr(f->path, " => ") == NULL &&
+	       prefixcmp(f->path, "...") != 0;
+}
+
+/* Renames and truncated paths cannot be split into directories either, so they
+ * are never grouped. */
 static bool
 statgrp_groupable(const struct statgrp_file *f)
 {
-	return strstr(f->path, " => ") == NULL &&
-	       prefixcmp(f->path, "...") != 0 &&
-	       strchr(f->path, '/') != NULL;
+	return statgrp_full_path(f) && strchr(f->path, '/') != NULL;
 }
 
 static struct statgrp_node *
@@ -1064,6 +1163,7 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	struct diff_stat_group *g = state->stat_group;
 	struct statgrp_node *root = NULL;
 	struct statgrp_node **groups = NULL;
+	struct line *stat;
 	char *line = NULL, *hdr = NULL;
 	bool ok = false, prior_section = false;
 	size_t i, maxrest = 0, maxfull = 0, maxdisp = 0;
@@ -1186,8 +1286,18 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 		}
 		snprintf(line, linecap, " %-*s %s",
 			 (int) maxdisp, f->path + f->disp, f->rest);
-		if (!diff_common_read_diff_stat(view, line))
+		stat = diff_common_read_diff_stat(view, line);
+		if (!stat)
 			goto out;
+
+		/* Map the entry to its file, the path being no longer whole. */
+		if (statgrp_full_path(f)) {
+			const char *path = get_path(f->path);
+
+			if (path &&
+			    !diff_stat_row_push(state, stat - view->line, path))
+				goto out;
+		}
 	}
 	/* Separate the last block from the "N files changed" summary. */
 	if (nchosen > 0 && !add_line_text(view, "", LINE_DIFF_STAT_HEADER))
@@ -1315,11 +1425,47 @@ diff_find_stat_entry(struct view *view, struct line *line, enum line_type type)
 		line == find_prev_line_by_type(view, marker, LINE_DIFF_HEADER);
 }
 
+/* The file diff of `path`, among the headers a diffstat entry can stand for. */
+static struct line *
+diff_find_header_by_pathname(struct view *view, const char *path)
+{
+	struct line *line;
+
+	for (line = view->line; view_has_line(view, line); line++) {
+		const char *file;
+
+		line = find_next_line_by_type(view, line, LINE_DIFF_HEADER);
+		if (!line)
+			break;
+
+		if (!diff_find_stat_entry(view, line, LINE_DIFF_INDEX)
+		    && !diff_find_stat_entry(view, line, LINE_DIFF_OLDMODE)
+		    && !diff_find_stat_entry(view, line, LINE_DIFF_SIMILARITY))
+			continue;
+
+		file = diff_get_pathname(view, line, false);
+		if (file && !strcmp(file, path))
+			return line;
+	}
+
+	return NULL;
+}
+
 static struct line *
 diff_find_header_from_stat(struct view *view, struct line *line)
 {
 	if (line->type == LINE_DIFF_STAT) {
+		const char *path = diff_stat_row_path(view, line);
 		int file_number = 0;
+
+		if (path) {
+			struct line *header = diff_find_header_by_pathname(view, path);
+
+			if (header)
+				return header;
+			/* An unmapped or unmatched entry falls back on its
+			 * position, which the entries in git's order keep. */
+		}
 
 		/* Count the stat entries above, skipping the group headers and the
 		 * blank separators so that grouping does not shift the numbering. */
