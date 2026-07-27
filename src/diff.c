@@ -40,6 +40,7 @@ const char *diff_stat_graph_width_arg(void)
 {
 	return opt_diff_stat_group ? "--stat-graph-width=20" : "";
 }
+static bool diff_refine_flush(struct view *view, struct diff_state *state);
 static void diff_refine_free(struct diff_refine **rp);
 static void diff_statgrp_free(struct diff_stat_group **gp);
 static void diff_stat_rows_free(struct diff_stat_rows **rp);
@@ -114,8 +115,14 @@ diff_init_highlight(struct view *view, struct diff_state *state)
 }
 
 bool
-diff_done_highlight(struct diff_state *state)
+diff_done_highlight(struct view *view, struct diff_state *state)
 {
+	/* Emit a +/- run still buffered when the diff ends inside a chunk. */
+	if (state->native_refine) {
+		if (!diff_refine_flush(view, state))
+			return false;
+		diff_refine_free(&state->refine);
+	}
 	if (!state->highlight)
 		return true;
 	io_kill(&state->view_io);
@@ -1541,16 +1548,11 @@ diff_read(struct view *view, struct buffer *buf, bool force_stop)
 		return diff_read_describe(view, buf, state);
 
 	if (!buf) {
-		if (state->native_refine) {
-			if (!diff_refine_flush(view, state))
-				return false;
-			diff_refine_free(&state->refine);
-		}
 		/* Flush a stat block that was not terminated by a summary line. */
 		if (state->stat_group && !diff_statgrp_flush(view, state))
 			return false;
 
-		if (!diff_done_highlight(state)) {
+		if (!diff_done_highlight(view, state)) {
 			if (!force_stop)
 				report("Failed to run the diff-highlight program: %s", opt_diff_highlight);
 			return false;

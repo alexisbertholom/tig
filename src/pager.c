@@ -141,7 +141,7 @@ pager_read(struct view *view, struct buffer *buf, bool force_stop)
 		do_scroll_view(view, 1);
 
 	if (!buf) {
-		if (!diff_done_highlight(view->private)) {
+		if (!diff_done_highlight(view, view->private)) {
 			if (!force_stop)
 				report("Failed to run the diff-highlight program: %s", opt_diff_highlight);
 			return false;

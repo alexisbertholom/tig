@@ -854,7 +854,7 @@ stage_read(struct view *view, struct buffer *buf, bool force_stop)
 		return pager_common_read(view, buf ? buf->data : NULL, LINE_DEFAULT, NULL);
 
 	if (!buf) {
-		if (!diff_done_highlight(&state->diff)) {
+		if (!diff_done_highlight(view, &state->diff)) {
 			if (!force_stop)
 				report("Failed to run the diff-highlight program: %s", opt_diff_highlight);
 			return false;
