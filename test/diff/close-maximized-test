@@ -12,6 +12,12 @@ steps '
 	:save-display restored-split.screen
 	:view-close
 	:save-display closed.screen
+
+	<Enter>
+	:view-log
+	:save-display log.screen
+	:view-close
+	:save-display restored-after-log.screen
 '
 
 tigrc <<EOF
@@ -50,3 +56,19 @@ assert_equals 'closed.screen' <<EOF
 
 [main] ee912870202200a0b9cf4fd86ba57243212d341e - commit 1 of 3             100%
 EOF
+
+assert_equals 'log.screen' <<EOF
+commit ee912870202200a0b9cf4fd86ba57243212d341e
+Refs: [master]
+Author: Jonas Fonseca <jonas.fonseca@gmail.com>
+Date:   Sat Mar 1 17:26:01 2014 -0500
+
+    WIP: Upgrade to 0.4-SNAPSHOT and DCE
+
+ common/benchmark-runner.sh                                  |  5 +++--
+ common/src/main/scala/org/scalajs/benchmark/Benchmark.scala | 11 +++++------
+ .../src/main/scala/org/scalajs/benchmark/BenchmarkApp.scala |  2 +-
+[log] ee912870202200a0b9cf4fd86ba57243212d341e - line 1 of 76                13%
+EOF
+
+assert_equals 'restored-after-log.screen' < 'restored-split.screen'

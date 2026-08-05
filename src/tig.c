@@ -344,10 +344,25 @@ view_driver(struct view *view, enum request request)
 		 * view itself. Parents to closed view should never be
 		 * followed. */
 		if (view->prev && view->prev != view) {
+			struct view *prev = view->prev;
+			struct view *child;
+			int index;
+
 			end_update(view, true);
-			maximize_view(view->prev, true);
+			maximize_view(prev, true);
 			view->prev = view;
 			view->parent = NULL;
+			/* Restore the split the previous view lost when it
+			 * was displaced (e.g. by opening a non-split view
+			 * from either half of a split). */
+			foreach_view(child, index) {
+				if (child->parent == prev && child != prev &&
+				    child->prev != child) {
+					split_view(prev, child);
+					redraw_display(false);
+					break;
+				}
+			}
 			break;
 		}
 		if (request == REQ_VIEW_CLOSE_NO_QUIT) {
