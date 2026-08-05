@@ -329,6 +329,17 @@ view_driver(struct view *view, enum request request)
 
 	case REQ_VIEW_CLOSE_NO_QUIT:
 	case REQ_VIEW_CLOSE:
+		/* A maximized split view is first restored to its split;
+		 * only a second close request closes it. */
+		if (view_close_restores_split(view)) {
+			display[0] = view->parent;
+			split_view(view->parent, view);
+			redraw_display(false);
+			report_clear();
+			break;
+		}
+		/* Fall-through */
+	case REQ_VIEW_CLOSE_FORCE:
 		/* XXX: Mark closed views by letting view->prev point to the
 		 * view itself. Parents to closed view should never be
 		 * followed. */

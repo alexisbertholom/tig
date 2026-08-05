@@ -389,7 +389,7 @@ tree_request(struct view *view, enum request request, struct line *line)
 	case REQ_BACK:
 		if (!*view->env->directory) {
 			/* quit view if at top of tree */
-			return REQ_VIEW_CLOSE;
+			return REQ_VIEW_CLOSE_FORCE;
 		}
 		/* fake 'cd  ..' */
 		pop_tree_stack_entry(&view->pos);

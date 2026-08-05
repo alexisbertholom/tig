@@ -777,7 +777,7 @@ status_request(struct view *view, enum request request, struct line *line)
 	}
 
 	if (show_untracked_only && view->parent == &main_view && !main_status_exists(view->parent, LINE_STAT_UNTRACKED))
-		return REQ_VIEW_CLOSE;
+		return REQ_VIEW_CLOSE_FORCE;
 
 	refresh_view(view);
 

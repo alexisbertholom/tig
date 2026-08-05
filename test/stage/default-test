@@ -46,6 +46,7 @@ steps '
 	:enter
 	:save-display staged-changes-for-a.screen
 	:view-close
+	:view-close
 
 	:5
 	:enter

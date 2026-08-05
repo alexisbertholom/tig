@@ -288,6 +288,7 @@ void reset_view_history(struct view_history *history);
 
 void split_view(struct view *prev, struct view *view);
 void maximize_view(struct view *view, bool redraw);
+bool view_close_restores_split(struct view *view);
 void load_view(struct view *view, struct view *prev, enum open_flags flags);
 
 #define refresh_view(view) load_view(view, NULL, OPEN_REFRESH)

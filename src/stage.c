@@ -728,7 +728,8 @@ stage_request(struct view *view, enum request request, struct line *line)
 
 	case REQ_VIEW_CLOSE:
 	case REQ_VIEW_CLOSE_NO_QUIT:
-		stage_line_type = 0;
+		if (!view_close_restores_split(view))
+			stage_line_type = 0;
 		return request;
 
 	case REQ_ENTER:
@@ -744,9 +745,9 @@ stage_request(struct view *view, enum request request, struct line *line)
 		stage_line_type = 0;
 		return view->parent == &status_view && view_is_displayed(view->parent)
 				? view_request(view->parent, REQ_ENTER)
-				: REQ_VIEW_CLOSE;
+				: REQ_VIEW_CLOSE_FORCE;
 	} else if (stage_line_type == LINE_STAT_UNTRACKED)
-		return REQ_VIEW_CLOSE;
+		return REQ_VIEW_CLOSE_FORCE;
 
 	refresh_view(view);
 

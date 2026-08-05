@@ -38,6 +38,7 @@
 	REQ_(MAXIMIZE,		"Maximize the current view"), \
 	REQ_(VIEW_CLOSE,	"Close the current view"), \
 	REQ_(VIEW_CLOSE_NO_QUIT,	"Close the current view without quitting"), \
+	REQ_(VIEW_CLOSE_FORCE,	"Close the current view without first restoring the split"), \
 	REQ_(QUIT,		"Close all views and quit"), \
 	\
 	REQ_GROUP("View-specific actions") \

@@ -777,6 +777,15 @@ split_view(struct view *prev, struct view *view)
 		reload_view(prev);
 }
 
+/* Whether closing this view will only restore the split it was
+ * maximized from, rather than actually close it. */
+bool
+view_close_restores_split(struct view *view)
+{
+	return displayed_views() == 1 && view->parent &&
+	       view->parent != view && view->parent->prev != view->parent;
+}
+
 void
 maximize_view(struct view *view, bool redraw)
 {
