@@ -1656,9 +1656,16 @@ view_request(struct view *view, enum request request)
 		}
 	}
 
-	if (request == REQ_REFRESH && !view_can_refresh(view)) {
-		report("This view can not be refreshed");
-		return REQ_NONE;
+	if (request == REQ_REFRESH) {
+		struct view *other = view == display[0] ? display[1] : display[0];
+
+		if (!view_can_refresh(view)) {
+			report("This view can not be refreshed");
+			return REQ_NONE;
+		}
+		/* Refresh the whole display, not just the focused view. */
+		if (other && view_can_refresh(other))
+			other->ops->request(other, REQ_REFRESH, &other->line[other->pos.lineno]);
 	}
 
 	return view->ops->request(view, request, &view->line[view->pos.lineno]);
