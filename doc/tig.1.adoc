@@ -81,6 +81,11 @@ grep::
 	Compare from <rev> instead of the common ancestor of HEAD and the
 	revision given to '--bdiff'.
 
+--bdiff-onto <rev>::
+	Compare each side from where it left <rev>, instead of from a common
+	ancestor. Use it when the branch was rebased onto a newer state of
+	the branch it is meant to be merged into.
+
 +<number>::
     Show the first view with line <number> visible and selected.
 
@@ -143,7 +148,13 @@ one of <rev>, commit by commit, starting from their common ancestor, the way
 git-range-diff(1) does. Without <rev>, HEAD is compared with its upstream,
 which tells what a rewrite did to the branch since it was last pushed. '--bdiff-base' compares from another commit instead,
 for when the best common ancestor is not the one the history was written
-against. The main view shows the history of HEAD, with every
+against.
+
+A rebase moves a branch onto a newer state of the branch it is meant to be
+merged into, so the two sides no longer start at the same commit and
+everything the rebase pulled in shows up as added. '--bdiff-onto <branch>'
+measures each side from where it left <branch> instead, leaving only the
+commits of the branch itself in the comparison. The main view shows the history of HEAD, with every
 commit of the compared range marked by how it relates to <rev>:
 
 [add]::
@@ -211,6 +222,11 @@ $ tig --bdiff
 Compare the current branch with the way it was before a rebase:
 -----------------------------------------------------------------------------
 $ tig --bdiff ORIG_HEAD
+-----------------------------------------------------------------------------
+
+Compare a branch rebased onto a newer master with the way it was pushed:
+-----------------------------------------------------------------------------
+$ tig --bdiff --bdiff-onto master
 -----------------------------------------------------------------------------
 
 Display the list of commits for the current branch:

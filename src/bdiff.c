@@ -40,7 +40,8 @@ struct bdiff_side {
 static struct {
 	bool active;
 	char rev[SIZEOF_REV];		/* Revision to compare against. */
-	char base[SIZEOF_REV];		/* Common ancestor. */
+	char base[SIZEOF_REV];		/* Commit HEAD is compared from. */
+	char old_base[SIZEOF_REV];	/* Commit the revision is compared from. */
 	struct bdiff_side new_side;	/* Commits of HEAD. */
 	struct bdiff_side old_side;	/* Commits of the other revision. */
 } bdiff;
@@ -265,7 +266,7 @@ bdiff_add_commit(struct bdiff_side *side, bool old_side, const char *id, const c
  * handled without a terminator that could occur in the message itself.
  */
 static bool
-bdiff_harvest(struct bdiff_side *side, bool old_side, const char *tip)
+bdiff_harvest(struct bdiff_side *side, bool old_side, const char *base, const char *tip)
 {
 	char range[SIZEOF_STR];
 	const char *log_argv[] = {
@@ -278,7 +279,7 @@ bdiff_harvest(struct bdiff_side *side, bool old_side, const char *tip)
 	struct buffer buf;
 	struct io io;
 
-	if (!string_format(range, "%s..%s", bdiff.base, tip))
+	if (!string_format(range, "%s..%s", base, tip))
 		die("Failed to format the %s range", old_side ? "compared" : "current");
 
 	if (!io_run(&io, IO_RD, NULL, NULL, log_argv))
@@ -451,13 +452,13 @@ bdiff_parse_pairing(char *line)
 }
 
 static bool
-bdiff_count_merges(const char *tip)
+bdiff_count_merges(const char *base, const char *tip)
 {
 	char range[SIZEOF_STR];
 	char buf[SIZEOF_STR] = "";
 	const char *argv[] = { "git", "rev-list", "--count", "--merges", range, "--", NULL };
 
-	if (!string_format(range, "%s..%s", bdiff.base, tip))
+	if (!string_format(range, "%s..%s", base, tip))
 		return false;
 
 	if (!io_run_buf(argv, buf, sizeof(buf), NULL, true))
@@ -475,7 +476,7 @@ bdiff_pair_commits(bool with_merges)
 	struct io io;
 	int argc = 0;
 
-	if (!string_format(old_range, "%s..%s", bdiff.base, bdiff.rev) ||
+	if (!string_format(old_range, "%s..%s", bdiff.old_base, bdiff.rev) ||
 	    !string_format(new_range, "%s..%s", bdiff.base, repo.head_id))
 		die("Failed to format the compared ranges");
 
@@ -719,11 +720,19 @@ bdiff_resolve_commit(const char *rev, char id[SIZEOF_REV])
 }
 
 static void
-bdiff_resolve(const char *rev, const char *base)
+bdiff_merge_base(const char *rev1, const char *rev2, char id[SIZEOF_REV])
 {
-	const char *merge_base_argv[] = { "git", "merge-base", "HEAD", bdiff.rev, NULL };
+	const char *merge_base_argv[] = { "git", "merge-base", rev1, rev2, NULL };
 	char buf[SIZEOF_STR] = "";
 
+	if (!io_run_buf(merge_base_argv, buf, sizeof(buf), NULL, false) || !*buf)
+		die("%s and %s have no common ancestor", rev1, rev2);
+	string_copy_rev(id, buf);
+}
+
+static void
+bdiff_resolve(const char *rev, const char *base, const char *onto)
+{
 	bdiff_resolve_commit(rev, bdiff.rev);
 
 	/* The commit the two sides are compared from is theirs to pick: the
@@ -731,16 +740,29 @@ bdiff_resolve(const char *rev, const char *base)
 	 * against. */
 	if (base) {
 		bdiff_resolve_commit(base, bdiff.base);
+		string_copy_rev(bdiff.old_base, bdiff.base);
 		return;
 	}
 
-	if (!io_run_buf(merge_base_argv, buf, sizeof(buf), NULL, false) || !*buf)
-		die("%s and HEAD have no common ancestor", rev);
-	string_copy_rev(bdiff.base, buf);
+	/* A rebase moves a branch onto a newer state of the branch it is
+	 * meant to be merged into, so the two sides no longer start at the
+	 * same commit: measure each of them from where it left that branch,
+	 * or everything the rebase pulled in shows up as added. */
+	if (onto) {
+		char onto_id[SIZEOF_REV];
+
+		bdiff_resolve_commit(onto, onto_id);
+		bdiff_merge_base(onto_id, repo.head_id, bdiff.base);
+		bdiff_merge_base(onto_id, bdiff.rev, bdiff.old_base);
+		return;
+	}
+
+	bdiff_merge_base("HEAD", bdiff.rev, bdiff.base);
+	string_copy_rev(bdiff.old_base, bdiff.base);
 }
 
 void
-bdiff_load(const char *rev, const char *base)
+bdiff_load(const char *rev, const char *base, const char *onto)
 {
 	bool merges;
 
@@ -757,14 +779,15 @@ bdiff_load(const char *rev, const char *base)
 		rev = repo.upstream;
 	}
 
-	bdiff_resolve(rev, base);
+	bdiff_resolve(rev, base, onto);
 
 	bdiff.active = true;
 
-	bdiff_harvest(&bdiff.old_side, true, bdiff.rev);
-	bdiff_harvest(&bdiff.new_side, false, repo.head_id);
+	bdiff_harvest(&bdiff.old_side, true, bdiff.old_base, bdiff.rev);
+	bdiff_harvest(&bdiff.new_side, false, bdiff.base, repo.head_id);
 
-	merges = bdiff_count_merges(bdiff.rev) || bdiff_count_merges(repo.head_id);
+	merges = bdiff_count_merges(bdiff.old_base, bdiff.rev) ||
+		 bdiff_count_merges(bdiff.base, repo.head_id);
 
 	/* git-range-diff refuses an empty range; with only one side left
 	 * there is nothing to pair anyway. */
