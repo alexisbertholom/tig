@@ -52,6 +52,7 @@ Searching
                            N find-prev           Find previous search match
 Misc
                            e edit                Open in editor
+                           E edit-blob           Open the file of the shown commit in editor
                            : prompt              Open the prompt
                            o options             Open the options menu
                     <Ctrl-L> screen-redraw       Redraw the screen
@@ -155,5 +156,4 @@ Toggle keys (enter: o <key>):
 
 
 
-
-[help] - line 2 of 152                                                                          100%
+[help] - line 2 of 153                                                                          100%

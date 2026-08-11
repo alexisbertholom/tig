@@ -22,6 +22,7 @@
 #include "tig/git.h"
 #include "tig/diff.h"
 #include "tig/main.h"
+#include "tig/tree.h"
 
 /*
  * Blame backend
@@ -419,6 +420,25 @@ blame_request(struct view *view, enum request request, struct line *line)
 	case REQ_BACK:
 		blame_go_back(view);
 		break;
+
+	case REQ_EDIT_BLOB:
+	{
+		char rev[SIZEOF_STR];
+
+		if (!check_blame_commit(blame, true))
+			break;
+
+		/* The file may have been renamed since; blame reports the
+		 * name it had in the commit the line comes from. */
+		if (!string_format(rev, "%s:%s", blame->commit->id,
+				   blame->commit->filename)) {
+			report("Failed to name the blamed revision");
+			break;
+		}
+
+		open_blob_editor(rev, blame->commit->filename, blame->lineno);
+		break;
+	}
 
 	case REQ_ENTER:
 		if (!check_blame_commit(blame, false))

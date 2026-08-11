@@ -320,6 +320,7 @@ view_driver(struct view *view, enum request request)
 		break;
 
 	case REQ_EDIT:
+	case REQ_EDIT_BLOB:
 		report("Nothing to edit");
 		break;
 

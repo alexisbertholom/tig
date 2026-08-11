@@ -340,6 +340,7 @@ bind generic	^	:toggle rev-filter	# Toggle filtering by revisions in rev-args
 
 # Misc
 bind generic	e	edit			# Open in editor
+bind generic	E	edit-blob		# Open the file of the shown commit in editor
 bind generic	:	prompt			# Open the prompt
 bind generic	<C-L>	screen-redraw		# Redraw the screen
 bind generic	z	stop-loading		# Stop all loading views

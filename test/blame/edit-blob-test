@@ -1,0 +1,77 @@
+#!/bin/sh
+#
+# Test opening the file of the blamed commit in the editor.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=10
+
+# The blob is opened from a temporary file whose name is not predictable.
+executable 'vim' <<EOF
+#!/bin/sh
+
+lineno="\$(expr "\$1" : '+\([0-9]*\)')"
+file="\$2"
+
+name="\$(basename "\$file" | sed -e 's/^tigblob\.[^.]*\.//')"
+printf 'line %s of %s\\n' "\$lineno" "\$name" >> "$HOME/editor.log"
+cat "\$file" >> "$HOME/editor.log"
+EOF
+
+steps '
+	:save-display blame.screen
+
+	:edit-blob
+	:move-down
+	:edit-blob
+'
+
+setup_blame_repo()
+{
+	git_init .
+
+	file src/old-name.c "alpha
+beta
+gamma
+"
+	git add src/old-name.c
+	git_commit -m "Add the file"
+
+	git mv src/old-name.c src/new-name.c
+	file src/new-name.c "alpha
+BETA
+gamma
+delta
+"
+	git add src/new-name.c
+	git_commit -m "Rename and edit the file"
+}
+
+in_work_dir setup_blame_repo
+
+test_tig blame src/new-name.c
+
+assert_equals 'blame.screen' <<EOF
+f02a44c src/old-name.c Committer 2009-02-13 23:31 +0000   1x alpha
+d265aeb src/new-name.c Committer 2009-02-22 11:53 +0000   2x BETA
+f02a44c src/old-name.c Committer 2009-02-13 23:31 +0000   3x gamma
+d265aeb src/new-name.c Committer 2009-02-22 11:53 +0000   4x delta
+ 
+ 
+ 
+ 
+[blame] f02a44c6955a28b2dd1f6e0ebbae91b2cc542bbb:src/old-name.c - line 1 of 100%
+EOF
+
+assert_equals 'editor.log' <<EOF
+line 1 of old-name.c
+alpha
+beta
+gamma
+line 2 of new-name.c
+alpha
+BETA
+gamma
+delta
+EOF

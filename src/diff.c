@@ -21,6 +21,7 @@
 #include "tig/diff.h"
 #include "tig/draw.h"
 #include "tig/apps.h"
+#include "tig/tree.h"
 
 static bool diff_highlight_is_internal(void);
 
@@ -44,6 +45,27 @@ static bool diff_refine_flush(struct view *view, struct diff_state *state);
 static void diff_refine_free(struct diff_refine **rp);
 static void diff_statgrp_free(struct diff_stat_group **gp);
 static void diff_stat_rows_free(struct diff_stat_rows **rp);
+
+/*
+ * Open the file of the commit being shown, rather than the one of the working
+ * tree, in the editor.
+ */
+static enum request
+diff_edit_blob(struct view *view, struct line *line)
+{
+	const char *file = diff_get_pathname(view, line, false);
+	char rev[SIZEOF_STR];
+
+	if (!file || !*file || !*view->vid ||
+	    !string_format(rev, "%s:%s", view->vid, file)) {
+		report("Nothing to edit");
+		return REQ_NONE;
+	}
+
+	open_blob_editor(rev, file, diff_get_lineno(view, line, false));
+
+	return REQ_NONE;
+}
 
 static enum status_code
 diff_open(struct view *view, enum open_flags flags)
@@ -1842,6 +1864,9 @@ diff_request(struct view *view, enum request request, struct line *line)
 
 	case REQ_EDIT:
 		return diff_common_edit(view, request, line);
+
+	case REQ_EDIT_BLOB:
+		return diff_edit_blob(view, line);
 
 	case REQ_ENTER:
 		return diff_common_enter(view, request, line);

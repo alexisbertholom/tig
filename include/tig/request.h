@@ -80,6 +80,7 @@
 	\
 	REQ_GROUP("Misc") \
 	REQ_(EDIT,		"Open in editor"), \
+	REQ_(EDIT_BLOB,		"Open the file of the shown commit in editor"), \
 	REQ_(PROMPT,		"Open the prompt"), \
 	REQ_(OPTIONS,		"Open the options menu"), \
 	REQ_(SCREEN_REDRAW,	"Redraw the screen"), \

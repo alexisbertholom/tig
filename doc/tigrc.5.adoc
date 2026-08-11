@@ -993,6 +993,7 @@ Misc
 [frame="none",grid="none",cols="25<m,75<"]
 |=============================================================================
 |edit                    |Open in editor
+|edit-blob               |Open the file as of the shown or blamed commit in editor
 |prompt                  |Open the prompt
 |options                 |Open the options menu
 |screen-redraw           |Redraw the screen
