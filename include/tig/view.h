@@ -187,6 +187,9 @@ enum open_flags {
 
 struct view_column_data {
 	struct view_column *section;
+	/* Marker drawn in front of the commit title; used by --bdiff. */
+	const char *marker;
+	enum line_type marker_type;
 	const struct ident *author;
 	const struct ident *committer;
 	const char *commit_title;

@@ -1,0 +1,155 @@
+#!/bin/sh
+#
+# Test the base diff of `tig --bdiff`.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=18
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+set diff-view = line-number:no text
+EOF
+
+steps '
+	:save-display bdiff-main.screen
+
+	:2
+	:enter
+	:save-display bdiff-del.screen
+	:view-close
+
+	:4
+	:enter
+	:save-display bdiff-change.screen
+	:view-close
+
+	:5
+	:enter
+	:save-display bdiff-move.screen
+'
+
+setup_bdiff_repo()
+{
+	rewrite_date="Sat Apr 4 13:29:36 2015 +0200"
+
+	git_init .
+
+	git_add base "base"
+	git_commit -m "Base"
+
+	git_add b "b"
+	git_commit -m "Kept commit"
+
+	git_add c "c"
+	git_commit -m "Changed commit"
+
+	git_add d "d"
+	git_commit -m "Moved commit"
+
+	git_add e "e"
+	git_commit -m "Removed commit"
+
+	git branch old
+
+	# Rewrite the history: the moved commit now comes first, the changed
+	# commit gains a line, the removed commit is dropped and a new commit
+	# is added on top.  Cherry-picking keeps the author dates, the way a
+	# rebase would.
+	git reset -q --hard old~3
+	unset GIT_AUTHOR_DATE
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick old~1 >/dev/null
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick old~2 >/dev/null
+	file c "c and more"
+	git add c
+	GIT_COMMITTER_DATE="$rewrite_date" git commit -q --amend --no-edit
+
+	git_add f "f"
+	git_commit -m "Added commit"
+}
+
+in_work_dir setup_bdiff_repo
+
+test_tig --bdiff old
+
+assert_equals 'bdiff-main.screen' <<EOF
+* [master] [add] Added commit
+| * [old] [del] Removed commit
+| * [from] Moved commit
+*-' [change] Changed commit
+* [move] Moved commit
+* Kept commit
+I Base
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+[main] 4e46f100f709900c927ed2df103aa44316df294d - commit 1 of 5             100%
+EOF
+
+assert_equals 'bdiff-del.screen' <<EOF
+* [master] [add] Added commit           |[del] previous commit 4e9f6b1d68331c9eb
+| * [old] [del] Removed commit          |commit 4e9f6b1d68331c9eb3b3269e0c75893e
+| * [from] Moved commit                 |Refs: [old]
+*-' [change] Changed commit             |Author:     Committer <c.ommitter@examp
+* [move] Moved commit                   |AuthorDate: Fri Mar 20 01:00:10 2009 +0
+* Kept commit                           |Commit:     Committer <c.ommitter@examp
+I Base                                  |CommitDate: Fri Mar 20 01:00:10 2009 +0
+                                        |
+                                        |    Removed commit
+                                        |---
+                                        | e | 1 +
+                                        | 1 file changed, 1 insertion(+)
+                                        |
+                                        |diff --git a/e b/e
+                                        |new file mode 100644
+                                        |index 0000000..9cbe6ea
+[main] 4e9f6b1d68331c9eb3b3269e0c75 100%|[diff] 4e9f6b1d68331c9eb3b3269e0c75 76%
+EOF
+
+assert_equals 'bdiff-change.screen' <<EOF
+* [master] [add] Added commit           |[change] metadata
+| * [old] [del] Removed commit          |-Parents:    35377cf90335d8d9b5a10fa56d
+| * [from] Moved commit                 |+Parents:    2563dc225b06362b3460264b30
+*-' [change] Changed commit             |
+* [move] Moved commit                   |[change] range diff
+* Kept commit                           |    @@ Commit message
+I Base                                  |
+                                        |      ## c (new) ##
+                                        |     @@
+                                        |    -+c
+                                        |    ++c and more
+                                        |      \ No newline at end of file
+                                        |
+                                        |[change] commit a6f8f7c1d96242272b02ca8
+                                        |commit a6f8f7c1d96242272b02ca872f7fb56d
+                                        |Author:     Committer <c.ommitter@examp
+[main] a6f8f7c1d96242272b02ca872f7f 100%|[diff] a6f8f7c1d96242272b02ca872f7f 29%
+EOF
+
+assert_equals 'bdiff-move.screen' <<EOF
+* [master] [add] Added commit           |[move] metadata
+| * [old] [del] Removed commit          |-Parents:    0378086e895fbc999219b22f45
+| * [from] Moved commit                 |+Parents:    35377cf90335d8d9b5a10fa56d
+*-' [change] Changed commit             |-Position:   2
+* [move] Moved commit                   |+Position:   1
+* Kept commit                           |
+I Base                                  |[move] commit 2563dc225b06362b3460264b3
+                                        |commit 2563dc225b06362b3460264b3008ec22
+                                        |Author:     Committer <c.ommitter@examp
+                                        |AuthorDate: Wed Mar 11 12:38:00 2009 +0
+                                        |Commit:     Committer <c.ommitter@examp
+                                        |CommitDate: Sat Apr 4 13:29:36 2015 +02
+                                        |
+                                        |    Moved commit
+                                        |---
+                                        | d | 1 +
+[main] 2563dc225b06362b3460264b3008 100%|[diff] 2563dc225b06362b3460264b3008 61%
+EOF

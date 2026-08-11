@@ -72,6 +72,10 @@ stash::
 grep::
 	Open the grep view. Supports the same options as git-grep(1).
 
+--bdiff <rev>::
+	Compare the history of HEAD with the one of <rev>, commit by commit,
+	starting from their common ancestor. See the "BASE DIFF" section.
+
 +<number>::
     Show the first view with line <number> visible and selected.
 
@@ -126,8 +130,75 @@ the log and diff views. For example:
 $ git log -Schange -p --raw | tig
 -----------------------------------------------------------------------------
 
+BASE DIFF
+-----------
+
+When started with '--bdiff <rev>', Tig compares the history of HEAD with the
+one of <rev>, commit by commit, starting from their common ancestor, the way
+git-range-diff(1) does. The main view shows the history of HEAD, with every
+commit of the compared range marked by how it relates to <rev>:
+
+[add]::
+	The commit only exists on HEAD.
+
+[del]::
+	The commit only exists on <rev>. It has no line of its own in the
+	history of HEAD and is inserted right after the nearest commit which
+	did survive the rewrite.
+
+[move]::
+	The commit was reordered, but nothing else changed.
+
+[from]::
+	Where a reordered commit used to be; mirrors a [move] or
+	[move-change] commit. Like [del], it is inserted into the history.
+
+[change]::
+	The commit kept its position, but its patch, its message or its
+	author changed.
+
+[same]::
+	Neither the position nor the contents of the commit changed. Only
+	its parent may have, as a result of the rewrite.
+
+[move-change]::
+	The commit was both reordered and modified.
+
+Opening a marked commit shows, depending on what applies to it: the changes
+git-range-diff(1) does not report (the author date, the parents and the
+position), the diff between the two patches, the patch of the commit on HEAD
+and the patch of the commit on <rev>. In those views, 'edit' opens the file of
+the working tree, while 'edit-blob' opens the file as of the commit the diff
+belongs to.
+
+Merge commits take part in the comparison; they are compared as the diff left
+over once the merge is replayed, which requires a Git version supporting
+`git range-diff --diff-merges`.
+
+Every line of the range diff carries two markers: the outer one tells which of
+the two patches the line belongs to, the inner one what that patch does to the
+file. They are painted on two channels, the way git-range-diff(1) does it: the
+color follows the inner marker, so that red always means a deletion and green
+an addition, while the attribute follows the outer one, dim for the previous
+patch and bold for the current one. Lines both patches have in common get no
+attribute at all.
+
+When 'diff-highlight' is set to `internal`, the lines of the two patches which
+do the same thing to the same place are compared word by word, and what
+changed between them is highlighted. See tigrc(5).
+
+The marker colors can be changed with the `bdiff-add`, `bdiff-del`,
+`bdiff-move`, `bdiff-from`, `bdiff-change`, `bdiff-same`, `bdiff-move-change`
+and `bdiff-section` color names, and those of the range diff with the
+`bdiff-range-*` ones. See tigrc(5).
+
 EXAMPLES
 --------
+
+Compare the current branch with the way it was before a rebase:
+-----------------------------------------------------------------------------
+$ tig --bdiff ORIG_HEAD
+-----------------------------------------------------------------------------
 
 Display the list of commits for the current branch:
 -----------------------------------------------------------------------------

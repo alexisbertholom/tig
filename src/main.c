@@ -54,6 +54,7 @@ main_status_exists(struct view *view, enum line_type type)
 }
 
 static bool main_add_changes(struct view *view, struct main_state *state, const char *parent);
+static void main_add_bdiff_commits(struct view *view, const char *id);
 
 static void
 main_register_commit(struct view *view, struct commit *commit, const char *ids, bool is_boundary)
@@ -67,6 +68,15 @@ main_register_commit(struct view *view, struct commit *commit, const char *ids, 
 	if ((state->add_changes_untracked || state->add_changes_unstaged || state->add_changes_staged) && is_head_commit(commit->id)) {
 		main_add_changes(view, state, ids);
 		state->add_changes_untracked = state->add_changes_unstaged = state->add_changes_staged = false;
+	}
+
+	if (bdiff_is_active()) {
+		const struct bdiff_commit *bdiff = bdiff_lookup(commit->id);
+
+		commit->bdiff = bdiff ? bdiff->state : BDIFF_NONE;
+		/* Commits which are gone from HEAD are displayed right before
+		 * the commit they were following. */
+		main_add_bdiff_commits(view, commit->id);
 	}
 
 	if (state->with_graph)
@@ -212,6 +222,42 @@ main_add_changes(struct view *view, struct main_state *state, const char *parent
 	return main_add_changes_commit(view, LINE_STAT_UNTRACKED, untracked_parent, "Untracked changes")
 	    && main_add_changes_commit(view, LINE_STAT_UNSTAGED, unstaged_parent, "Unstaged changes")
 	    && main_add_changes_commit(view, LINE_STAT_STAGED, staged_parent, "Staged changes");
+}
+
+/*
+ * Commits which only exist on the revision given to --bdiff have no line of
+ * their own in the log of HEAD; they are inserted in front of the commit they
+ * used to be followed by, and report it as their parent so that the graph
+ * stays well formed.
+ */
+static void
+main_add_bdiff_commits(struct view *view, const char *id)
+{
+	struct main_state *state = view->private;
+	struct graph *graph = state->graph;
+	struct bdiff_commit *injected;
+
+	for (injected = bdiff_injected_at(id); injected; injected = injected->next_injected) {
+		struct commit commit = {{0}};
+		char ids[SIZEOF_STR];
+
+		string_copy_rev(commit.id, injected->id);
+		commit.author = commit.committer =
+			injected->author ? injected->author : &unknown_ident;
+		commit.author_time = commit.commit_time = injected->author_time;
+		commit.bdiff = injected->state;
+
+		if (!string_format(ids, "%s %s", injected->id, injected->graph_parent))
+			return;
+
+		if (state->with_graph) {
+			graph->add_commit(graph, &commit.graph, commit.id, ids, false);
+			graph->render_parents(graph, &commit.graph);
+		}
+
+		if (!main_add_commit(view, LINE_MAIN_COMMIT, &commit, injected->subject, true))
+			return;
+	}
 }
 
 static bool
@@ -425,6 +471,10 @@ main_get_column_data(struct view *view, const struct line *line, struct view_col
 	column_data->id = commit->id;
 
 	column_data->commit_title = commit->title;
+	if (commit->bdiff != BDIFF_NONE) {
+		column_data->marker = bdiff_state_label(commit->bdiff);
+		column_data->marker_type = bdiff_state_line_type(commit->bdiff);
+	}
 	if (state->with_graph) {
 		column_data->graph = state->graph;
 		column_data->graph_canvas = &commit->graph;

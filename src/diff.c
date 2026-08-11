@@ -25,6 +25,28 @@
 
 static bool diff_highlight_is_internal(void);
 
+/* How a line is painted; the range diff of a base diff needs more than the
+ * single color and marker of an ordinary diff line. */
+struct refine_style {
+	enum line_type type;		/* color of the line */
+	enum line_type hi_type;		/* color of the words which differ */
+	enum line_type mark_type;	/* color of the leading marker cell */
+	unsigned int indent;		/* leading run drawn as plain text */
+	unsigned int mark_len;		/* length of the leading marker cell */
+	unsigned int prefix;		/* markers + indent, never highlighted */
+	bool added;			/* belongs to the added side */
+};
+
+struct diff_refine;
+struct refine_line;
+
+static bool refine_push_styled_line(struct diff_refine *r, const char *text,
+				    const struct refine_style *style);
+static bool refine_emit_styled_line(struct view *view, const char *text,
+				    const struct refine_style *style);
+static bool refine_push_pair_line(struct diff_refine **rp, const char *text,
+				  const struct refine_style *style);
+
 /* When grouping the diffstat, ask git for the full, untruncated paths (its
  * default budget elides them to ".../"): tig then re-fits them to the view
  * width itself.  Raising --stat-name-width alone has no effect, so --stat-width
@@ -45,6 +67,625 @@ static bool diff_refine_flush(struct view *view, struct diff_state *state);
 static void diff_refine_free(struct diff_refine **rp);
 static void diff_statgrp_free(struct diff_stat_group **gp);
 static void diff_stat_rows_free(struct diff_stat_rows **rp);
+
+/*
+ * Base diff.
+ *
+ * A commit compared with --bdiff is shown as up to four sections: the changes
+ * range-diff does not report, the diff between the two patches, and the patch
+ * of each side.  Each section is loaded by its own command, chained together
+ * as each one reaches its end.
+ */
+
+static void
+diff_bdiff_show_argv(const char *id, bool merge, const char *argv[])
+{
+	const char *show_argv[] = {
+		"git", "show", encoding_arg, "--pretty=fuller", "--root",
+			"--patch-with-stat", diff_stat_width_arg(),
+			diff_stat_name_width_arg(), diff_stat_graph_width_arg(),
+			use_mailmap_arg(),
+			show_notes_arg(), diff_context_arg(), ignore_space_arg(),
+			DIFF_ARGS, "%(cmdlineargs)", "--no-color", word_diff_arg(),
+			NULL
+	};
+	int argc = 0;
+
+	while (show_argv[argc]) {
+		argv[argc] = show_argv[argc];
+		argc++;
+	}
+
+	/* A merge is shown the way range-diff compared it, as the diff left
+	 * over once the merge is replayed. */
+	if (merge)
+		argv[argc++] = "--diff-merges=remerge";
+
+	argv[argc++] = id;
+	argv[argc++] = "--";
+	argv[argc++] = "%(fileargs)";
+	argv[argc] = NULL;
+}
+
+static const char *
+diff_bdiff_kind_name(enum bdiff_section_kind kind)
+{
+	switch (kind) {
+	case BDIFF_SECTION_META:	return "metadata";
+	case BDIFF_SECTION_RANGE:	return "range diff";
+	case BDIFF_SECTION_NEW:		return "commit";
+	case BDIFF_SECTION_OLD:		return "previous commit";
+	}
+
+	return "";
+}
+
+static struct bdiff_section *
+diff_bdiff_begin_section(struct view *view, struct diff_state *state,
+			 enum bdiff_section_kind kind, const char *id)
+{
+	struct bdiff_section *section;
+	const char *label = bdiff_state_label(state->bdiff->state);
+
+	if (state->bdiff_sections >= BDIFF_SECTIONS)
+		return NULL;
+
+	section = &state->bdiff_section[state->bdiff_sections];
+	section->kind = kind;
+	section->id = id;
+	section->start = view->lines;
+
+	/* Each section is parsed on its own. */
+	state->bdiff_range_inner = -1;
+	state->after_commit_title = false;
+	state->after_diff = false;
+	state->reading_diff_chunk = false;
+	state->reading_diff_stat = false;
+	state->combined_diff = false;
+	state->parents = 0;
+
+	if (view->lines && !add_line_text(view, "", LINE_DEFAULT))
+		return NULL;
+
+	if (id && *id) {
+		if (!add_line_format(view, LINE_BDIFF_SECTION, "%s %s %s",
+				     label, diff_bdiff_kind_name(kind), id))
+			return NULL;
+	} else if (!add_line_format(view, LINE_BDIFF_SECTION, "%s %s",
+				    label, diff_bdiff_kind_name(kind))) {
+		return NULL;
+	}
+
+	state->bdiff_sections++;
+
+	return section;
+}
+
+/*
+ * range-diff reports the commit message, the patch and the author name, but
+ * is blind to the author date and to the position a commit was moved from.
+ * The committer is left out on purpose: rewriting the history always changes
+ * it, so reporting it would only add noise.
+ */
+static bool
+diff_bdiff_metadata_lines(struct view *view,
+			  const struct bdiff_commit *new_commit,
+			  const struct bdiff_commit *old_commit,
+			  bool add_lines)
+{
+	bool changed = false;
+
+	if (!new_commit || !old_commit)
+		return false;
+
+	if (ident_compare(new_commit->author, old_commit->author)) {
+		changed = true;
+		if (add_lines &&
+		    (!add_line_format(view, LINE_DIFF_DEL, "-Author:     %s <%s>",
+				      old_commit->author->name, old_commit->author->email) ||
+		     !add_line_format(view, LINE_DIFF_ADD, "+Author:     %s <%s>",
+				      new_commit->author->name, new_commit->author->email)))
+			return false;
+	}
+
+	if (new_commit->author_time.sec != old_commit->author_time.sec) {
+		changed = true;
+		if (add_lines &&
+		    (!add_line_format(view, LINE_DIFF_DEL, "-AuthorDate: %s",
+				      mkdate(&old_commit->author_time, DATE_DEFAULT, false, NULL)) ||
+		     !add_line_format(view, LINE_DIFF_ADD, "+AuthorDate: %s",
+				      mkdate(&new_commit->author_time, DATE_DEFAULT, false, NULL))))
+			return false;
+	}
+
+	if (bdiff_parents_differ(new_commit, old_commit)) {
+		changed = true;
+		if (add_lines &&
+		    (!add_line_format(view, LINE_DIFF_DEL, "-Parents:    %s", old_commit->parents) ||
+		     !add_line_format(view, LINE_DIFF_ADD, "+Parents:    %s", new_commit->parents)))
+			return false;
+	}
+
+	if (new_commit->state == BDIFF_MOVE || new_commit->state == BDIFF_MOVE_CHANGE) {
+		changed = true;
+		if (add_lines &&
+		    (!add_line_format(view, LINE_DIFF_DEL, "-Position:   %d", old_commit->pos) ||
+		     !add_line_format(view, LINE_DIFF_ADD, "+Position:   %d", new_commit->pos)))
+			return false;
+	}
+
+	return changed;
+}
+
+static bool
+diff_bdiff_plan(struct view *view, struct diff_state *state)
+{
+	const struct bdiff_commit *commit = state->bdiff;
+	const struct bdiff_commit *new_commit;
+	const struct bdiff_commit *old_commit;
+	const char *new_id, *old_id;
+
+	bdiff_sides(commit, &new_id, &old_id);
+	if (new_id)
+		string_copy_rev(state->bdiff_new_id, new_id);
+	if (old_id)
+		string_copy_rev(state->bdiff_old_id, old_id);
+
+	new_commit = new_id ? bdiff_lookup(new_id) : NULL;
+	old_commit = old_id ? bdiff_lookup(old_id) : NULL;
+
+	state->bdiff_planned = 0;
+	state->bdiff_next = 0;
+
+	if (diff_bdiff_metadata_lines(view, new_commit, old_commit, false))
+		state->bdiff_plan[state->bdiff_planned++] = BDIFF_SECTION_META;
+
+	if (bdiff_state_shows_range(commit->state) && new_id && old_id)
+		state->bdiff_plan[state->bdiff_planned++] = BDIFF_SECTION_RANGE;
+
+	if (bdiff_state_shows_new(commit->state) && new_id)
+		state->bdiff_plan[state->bdiff_planned++] = BDIFF_SECTION_NEW;
+
+	if (bdiff_state_shows_old(commit->state) && old_id)
+		state->bdiff_plan[state->bdiff_planned++] = BDIFF_SECTION_OLD;
+
+	return state->bdiff_planned > 0;
+}
+
+/* Build the command loading the given section; returns false for the sections
+ * which are rendered from what is already known. */
+static bool
+diff_bdiff_section_argv(struct diff_state *state, enum bdiff_section_kind kind,
+			const char *argv[], const char **id)
+{
+	int argc = 0;
+
+	*id = NULL;
+
+	switch (kind) {
+	case BDIFF_SECTION_META:
+		return false;
+
+	case BDIFF_SECTION_RANGE:
+		if (!string_format(state->bdiff_old_arg, "%s^!", state->bdiff_old_id) ||
+		    !string_format(state->bdiff_new_arg, "%s^!", state->bdiff_new_id))
+			return false;
+
+		argv[argc++] = "git";
+		argv[argc++] = "range-diff";
+		argv[argc++] = "--no-color";
+		argv[argc++] = "--abbrev=40";
+		/* The two commits are already known to match; keep range-diff
+		 * from giving up on a patch which changed too much. */
+		argv[argc++] = "--creation-factor=999";
+		if (state->bdiff->merge)
+			argv[argc++] = "--diff-merges=remerge";
+		argv[argc++] = state->bdiff_old_arg;
+		argv[argc++] = state->bdiff_new_arg;
+		argv[argc] = NULL;
+		return true;
+
+	case BDIFF_SECTION_NEW:
+		*id = state->bdiff_new_id;
+		diff_bdiff_show_argv(state->bdiff_new_id, state->bdiff->merge, argv);
+		return true;
+
+	case BDIFF_SECTION_OLD:
+		*id = state->bdiff_old_id;
+		diff_bdiff_show_argv(state->bdiff_old_id, state->bdiff->merge, argv);
+		return true;
+	}
+
+	return false;
+}
+
+static bool
+diff_bdiff_add_metadata(struct view *view, struct diff_state *state)
+{
+	return !!diff_bdiff_begin_section(view, state, BDIFF_SECTION_META, NULL) &&
+	       diff_bdiff_metadata_lines(view,
+					 bdiff_lookup(state->bdiff_new_id),
+					 bdiff_lookup(state->bdiff_old_id), true);
+}
+
+/*
+ * Start the next section which needs a command of its own, rendering the
+ * sections which do not need one along the way.  Only the first section may
+ * reset the view, so it is loaded before any line is added.
+ */
+static enum status_code
+diff_bdiff_load_section(struct view *view, struct diff_state *state, enum open_flags flags)
+{
+	while (state->bdiff_next < state->bdiff_planned) {
+		enum bdiff_section_kind kind = state->bdiff_plan[state->bdiff_next++];
+		const char *argv[32];
+		const char *id;
+
+		if (!diff_bdiff_section_argv(state, kind, argv, &id)) {
+			if (kind == BDIFF_SECTION_META && !diff_bdiff_add_metadata(view, state))
+				return error("Failed to show the base diff metadata");
+			continue;
+		}
+
+		if (!diff_bdiff_begin_section(view, state, kind, id))
+			return error("Failed to show the base diff section");
+
+		return begin_update(view, NULL, argv, flags | OPEN_EXTRA);
+	}
+
+	return SUCCESS;
+}
+
+/*
+ * Load the first section, which is the one resetting the view, and only then
+ * add the lines of the sections rendered without a command of their own.
+ */
+static enum status_code
+diff_bdiff_start(struct view *view, struct diff_state *state, enum open_flags flags)
+{
+	const char *argv[32];
+	const char *id;
+	enum status_code code;
+	int first;
+
+	for (first = 0; first < state->bdiff_planned; first++)
+		if (diff_bdiff_section_argv(state, state->bdiff_plan[first], argv, &id))
+			break;
+
+	if (first == state->bdiff_planned)
+		return error("Nothing to show for this commit");
+
+	code = begin_update(view, NULL, argv, flags | OPEN_WITH_STDERR);
+	if (code != SUCCESS)
+		return code;
+
+	/* The view already holds this commit and was left untouched. */
+	if (view->lines)
+		return SUCCESS;
+
+	for (state->bdiff_next = 0; state->bdiff_next < first; state->bdiff_next++)
+		if (!diff_bdiff_add_metadata(view, state))
+			return error("Failed to show the base diff metadata");
+
+	state->bdiff_next = first + 1;
+
+	if (!diff_bdiff_begin_section(view, state, state->bdiff_plan[first], id))
+		return error("Failed to show the base diff section");
+
+	return SUCCESS;
+}
+
+static struct bdiff_section *
+diff_bdiff_section_at(struct diff_state *state, unsigned long lineno)
+{
+	int i;
+
+	for (i = state->bdiff_sections - 1; i >= 0; i--)
+		if (lineno >= state->bdiff_section[i].start)
+			return &state->bdiff_section[i];
+
+	return NULL;
+}
+
+/*
+ * The output of range-diff is a diff of diffs: every line is indented and
+ * carries the marker of the outer diff in front of the inner one, which none
+ * of the usual diff line rules match.
+ *
+ * The two markers are painted on two separate channels, the way git does it:
+ * the color follows the inner marker, so that red always means a deletion and
+ * green an addition, while the attribute follows the outer one, dim for the
+ * previous patch and bold for the current one.  Lines both patches have in
+ * common get no attribute at all, which is what makes the ones that differ
+ * stand out.
+ */
+
+#define BDIFF_RANGE_INDENT 4
+
+enum bdiff_range_outer {
+	BDIFF_RANGE_BOTH,
+	BDIFF_RANGE_OLD,
+	BDIFF_RANGE_NEW
+};
+
+enum bdiff_range_inner {
+	BDIFF_RANGE_CONTEXT,
+	BDIFF_RANGE_DEL,
+	BDIFF_RANGE_ADD,
+	BDIFF_RANGE_CHUNK
+};
+
+static enum line_type
+diff_bdiff_range_body(enum bdiff_range_outer outer, enum bdiff_range_inner inner)
+{
+	static const enum line_type body[3][4] = {
+		{ LINE_BDIFF_RANGE_BOTH_CONTEXT, LINE_BDIFF_RANGE_BOTH_DEL,
+		  LINE_BDIFF_RANGE_BOTH_ADD, LINE_BDIFF_RANGE_BOTH_CHUNK },
+		{ LINE_BDIFF_RANGE_OLD_CONTEXT, LINE_BDIFF_RANGE_OLD_DEL,
+		  LINE_BDIFF_RANGE_OLD_ADD, LINE_BDIFF_RANGE_OLD_CHUNK },
+		{ LINE_BDIFF_RANGE_NEW_CONTEXT, LINE_BDIFF_RANGE_NEW_DEL,
+		  LINE_BDIFF_RANGE_NEW_ADD, LINE_BDIFF_RANGE_NEW_CHUNK },
+	};
+
+	return body[outer][inner];
+}
+
+static enum line_type
+diff_bdiff_range_highlight(enum bdiff_range_outer outer, enum bdiff_range_inner inner)
+{
+	static const enum line_type highlight[2][3] = {
+		{ LINE_BDIFF_RANGE_OLD_CONTEXT_HIGHLIGHT,
+		  LINE_BDIFF_RANGE_OLD_DEL_HIGHLIGHT,
+		  LINE_BDIFF_RANGE_OLD_ADD_HIGHLIGHT },
+		{ LINE_BDIFF_RANGE_NEW_CONTEXT_HIGHLIGHT,
+		  LINE_BDIFF_RANGE_NEW_DEL_HIGHLIGHT,
+		  LINE_BDIFF_RANGE_NEW_ADD_HIGHLIGHT },
+	};
+
+	return highlight[outer - BDIFF_RANGE_OLD][inner];
+}
+
+/* Emit the block of lines buffered for refinement, if any. */
+static bool
+diff_bdiff_flush_range(struct view *view, struct diff_state *state)
+{
+	state->bdiff_range_inner = -1;
+
+	if (!state->refine)
+		return true;
+
+	return diff_refine_flush(view, state);
+}
+
+static bool
+diff_bdiff_read_range(struct view *view, struct diff_state *state, const char *text)
+{
+	enum bdiff_range_outer outer;
+	enum bdiff_range_inner inner;
+	struct refine_style style = {0};
+	size_t len = strlen(text);
+	size_t prefix;
+
+	/* Skip the "1:  <id> ! 1:  <id> title" header; the section already
+	 * names both commits. */
+	if (*text && !isspace((unsigned char) *text))
+		return diff_bdiff_flush_range(view, state);
+
+	if (len <= BDIFF_RANGE_INDENT) {
+		if (!diff_bdiff_flush_range(view, state))
+			return false;
+		return !!add_line_text(view, text, LINE_BDIFF_RANGE_BOTH_CONTEXT);
+	}
+
+	switch (text[BDIFF_RANGE_INDENT]) {
+	case '-':
+		outer = BDIFF_RANGE_OLD;
+		break;
+	case '+':
+		outer = BDIFF_RANGE_NEW;
+		break;
+	default:
+		outer = BDIFF_RANGE_BOTH;
+		break;
+	}
+
+	switch (len > BDIFF_RANGE_INDENT + 1 ? text[BDIFF_RANGE_INDENT + 1] : ' ') {
+	case '-':
+		inner = BDIFF_RANGE_DEL;
+		break;
+	case '+':
+		inner = BDIFF_RANGE_ADD;
+		break;
+	case '@':
+		inner = BDIFF_RANGE_CHUNK;
+		break;
+	default:
+		inner = BDIFF_RANGE_CONTEXT;
+		break;
+	}
+
+	/* The header naming the file of the compared patches. */
+	if (outer == BDIFF_RANGE_BOTH && text[BDIFF_RANGE_INDENT] == '@')
+		inner = BDIFF_RANGE_CHUNK;
+
+	style.type = diff_bdiff_range_body(outer, inner);
+	style.indent = BDIFF_RANGE_INDENT;
+	style.mark_len = 1;
+	style.mark_type = outer == BDIFF_RANGE_OLD ? LINE_BDIFF_RANGE_OLD_MARK
+			: outer == BDIFF_RANGE_NEW ? LINE_BDIFF_RANGE_NEW_MARK
+			: style.type;
+	style.added = outer == BDIFF_RANGE_NEW;
+
+	/* Neither marker nor indentation is ever highlighted. */
+	prefix = BDIFF_RANGE_INDENT + 2;
+	while (prefix < len && (text[prefix] == ' ' || text[prefix] == '\t'))
+		prefix++;
+	style.prefix = prefix;
+
+	/* Only a line belonging to a single patch can be compared with the
+	 * matching line of the other one, and only the lines doing the same
+	 * thing to the file are matched: a deletion the previous patch made
+	 * with a deletion this one makes, and likewise for additions and for
+	 * context lines. */
+	if (!state->native_refine || outer == BDIFF_RANGE_BOTH ||
+	    inner == BDIFF_RANGE_CHUNK) {
+		if (!diff_bdiff_flush_range(view, state))
+			return false;
+		return refine_emit_styled_line(view, text, &style);
+	}
+
+	if (state->bdiff_range_inner != (int) inner &&
+	    !diff_bdiff_flush_range(view, state))
+		return false;
+
+	state->bdiff_range_inner = inner;
+	style.hi_type = diff_bdiff_range_highlight(outer, inner);
+
+	return refine_push_pair_line(&state->refine, text, &style);
+}
+
+/*
+ * Pick the file name out of a "## name ##" header of a range diff.
+ */
+static bool
+diff_bdiff_range_filename(const char *text, char *buf, size_t buflen)
+{
+	const char *start = strstr(text, "## ");
+	const char *end, *rename;
+
+	if (!start)
+		return false;
+
+	start += STRING_SIZE("## ");
+	end = strstr(start, " ##");
+	if (!end || end == start)
+		return false;
+
+	/* The header of a renamed file names both sides. */
+	rename = strstr(start, " => ");
+	if (rename && rename < end)
+		start = rename + STRING_SIZE(" => ");
+
+	/* Drop the "(new)", "(gone)", ... annotation. */
+	if (end > start && end[-1] == ')') {
+		const char *annotation = end;
+
+		while (annotation > start && *annotation != '(')
+			annotation--;
+		if (annotation > start && annotation[-1] == ' ')
+			end = annotation - 1;
+	}
+
+	if (end <= start || (size_t) (end - start) >= buflen)
+		return false;
+
+	/* The metadata and the commit message are not files. */
+	if (!strncmp(start, "Metadata ", 9) || !strncmp(start, "Commit message ", 15))
+		return false;
+
+	string_ncopy_do(buf, buflen, start, end - start);
+
+	return true;
+}
+
+/*
+ * Find the file a line of a range diff belongs to, and which side of the
+ * comparison it came from: the outer diff marks the lines of the previous
+ * commit with a '-'.
+ */
+static bool
+diff_bdiff_range_file(struct view *view, struct bdiff_section *section,
+		      struct line *line, char *buf, size_t buflen, bool *old_side)
+{
+	const char *text = box_text(line);
+	unsigned long lineno = line - view->line;
+
+	*old_side = text && strlen(text) > 4 && text[4] == '-';
+
+	for (; lineno + 1 > section->start; lineno--) {
+		const char *at = box_text(&view->line[lineno]);
+
+		if (at && diff_bdiff_range_filename(at, buf, buflen))
+			return true;
+	}
+
+	return false;
+}
+
+static enum request
+diff_bdiff_edit(struct view *view, struct diff_state *state, struct line *line, bool blob)
+{
+	struct bdiff_section *section = diff_bdiff_section_at(state, line - view->line);
+	char filename[SIZEOF_STR];
+	const char *file = NULL;
+	unsigned int lineno = 0;
+	const char *id = NULL;
+
+	if (!section)
+		return REQ_NONE;
+
+	switch (section->kind) {
+	case BDIFF_SECTION_META:
+		report("Nothing to edit");
+		return REQ_NONE;
+
+	case BDIFF_SECTION_RANGE:
+	{
+		bool old_side = false;
+
+		if (!diff_bdiff_range_file(view, section, line,
+					   filename, sizeof(filename), &old_side)) {
+			report("Nothing to edit");
+			return REQ_NONE;
+		}
+
+		/* The line numbers of a diff of diffs do not point into the
+		 * file, so it is opened at its first line. */
+		file = filename;
+		id = old_side ? state->bdiff_old_id : state->bdiff_new_id;
+		break;
+	}
+
+	case BDIFF_SECTION_NEW:
+	case BDIFF_SECTION_OLD:
+		file = diff_get_pathname(view, line, false);
+		id = section->id;
+		/* Only the commit shown by the section can be addressed by
+		 * line; the working tree has no reason to match the previous
+		 * commit. */
+		if (blob || section->kind == BDIFF_SECTION_NEW)
+			lineno = diff_get_lineno(view, line, false);
+		break;
+	}
+
+	if (!file || !*file) {
+		report("Nothing to edit");
+		return REQ_NONE;
+	}
+
+	if (blob) {
+		char rev[SIZEOF_STR];
+
+		if (!id || !*id || !string_format(rev, "%s:%s", id, file)) {
+			report("Nothing to edit");
+			return REQ_NONE;
+		}
+
+		open_blob_editor(rev, file, lineno);
+
+	} else {
+		char path[SIZEOF_STR];
+
+		if (!string_concat_path(path, repo.cdup, file) || access(path, R_OK)) {
+			report("Failed to open file: %s", file);
+			return REQ_NONE;
+		}
+
+		open_editor(file, lineno);
+	}
+
+	return REQ_NONE;
+}
 
 /*
  * Open the file of the commit being shown, rather than the one of the working
@@ -79,11 +720,25 @@ diff_open(struct view *view, enum open_flags flags)
 			DIFF_ARGS, "%(cmdlineargs)", "--no-color", word_diff_arg(),
 			"%(commit)", "--", "%(fileargs)", NULL
 	};
+	struct diff_state *state = view->private;
 	enum status_code code;
 
 	diff_save_line(view, view->private, flags);
 
-	code = begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
+	state->bdiff = bdiff_is_active() ? bdiff_lookup(view->env->commit) : NULL;
+
+	if (state->bdiff) {
+		state->bdiff_sections = 0;
+		if (!diff_bdiff_plan(view, state))
+			state->bdiff = NULL;
+	}
+
+	if (state->bdiff) {
+		code = diff_bdiff_start(view, state, flags);
+	} else {
+		code = begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
+	}
+
 	if (code != SUCCESS)
 		return code;
 
@@ -397,9 +1052,7 @@ diff_common_highlight(struct view *view, const char *text, enum line_type type)
 
 struct refine_line {
 	char *text;			/* owned copy of the stored diff line */
-	enum line_type type;
-	bool added;
-	unsigned int prefix;		/* marker + indent, never highlighted */
+	struct refine_style style;
 	int tok_first, tok_count;	/* range into the removed/added tokens */
 };
 
@@ -415,6 +1068,9 @@ struct diff_refine {
 	struct refine_token *removed, *added;
 	size_t nremoved, removed_alloc;
 	size_t nadded, added_alloc;
+	/* Only highlight when both sides of the block are present, instead of
+	 * treating a one-sided block as entirely new. */
+	bool pair_only;
 };
 
 static bool
@@ -476,10 +1132,10 @@ refine_tokenize(struct diff_refine *r, int line_idx)
 	struct refine_line *ln = &r->line[line_idx];
 	const char *s = ln->text;
 	size_t len = strlen(s);
-	size_t i = ln->prefix;
-	struct refine_token **arr = ln->added ? &r->added : &r->removed;
-	size_t *n = ln->added ? &r->nadded : &r->nremoved;
-	size_t *alloc = ln->added ? &r->added_alloc : &r->removed_alloc;
+	size_t i = ln->style.prefix;
+	struct refine_token **arr = ln->style.added ? &r->added : &r->removed;
+	size_t *n = ln->style.added ? &r->nadded : &r->nremoved;
+	size_t *alloc = ln->style.added ? &r->added_alloc : &r->removed_alloc;
 
 	ln->tok_first = (int) *n;
 	while (i < len) {
@@ -499,8 +1155,8 @@ refine_tokenize(struct diff_refine *r, int line_idx)
 }
 
 static bool
-refine_push_line(struct diff_refine *r, const char *text, enum line_type type,
-		 bool added)
+refine_push_styled_line(struct diff_refine *r, const char *text,
+			const struct refine_style *style)
 {
 	struct refine_line *ln;
 	char *copy = strdup(text);
@@ -520,11 +1176,40 @@ refine_push_line(struct diff_refine *r, const char *text, enum line_type type,
 	}
 	ln = &r->line[r->lines++];
 	ln->text = copy;
-	ln->type = type;
-	ln->added = added;
-	ln->prefix = refine_prefix_len(copy);
+	ln->style = *style;
 	ln->tok_first = ln->tok_count = 0;
 	return refine_tokenize(r, (int) (r->lines - 1));
+}
+
+/* Buffer a line which is only highlighted when the matching line of the other
+ * patch shows up too. */
+static bool
+refine_push_pair_line(struct diff_refine **rp, const char *text,
+		      const struct refine_style *style)
+{
+	if (!*rp) {
+		*rp = calloc(1, sizeof(**rp));
+		if (!*rp)
+			return false;
+	}
+	(*rp)->pair_only = true;
+
+	return refine_push_styled_line(*rp, text, style);
+}
+
+static bool
+refine_push_line(struct diff_refine *r, const char *text, enum line_type type,
+		 bool added)
+{
+	struct refine_style style = {0};
+
+	style.type = type;
+	style.hi_type = (type == LINE_DIFF_ADD || type == LINE_DIFF_ADD2)
+			? LINE_DIFF_ADD_HIGHLIGHT : LINE_DIFF_DEL_HIGHLIGHT;
+	style.added = added;
+	style.prefix = refine_prefix_len(text);
+
+	return refine_push_styled_line(r, text, &style);
 }
 
 static bool
@@ -584,22 +1269,62 @@ refine_lcs(struct diff_refine *r)
 static bool
 refine_emit_plain(struct view *view, struct refine_line *ln)
 {
-	return pager_common_read(view, ln->text, ln->type, NULL);
+	struct diff_stat_context ctx = { ln->text, LINE_DEFAULT };
+
+	/* A line with a marker of its own is drawn as cells even when it is
+	 * not refined, so that the marker keeps its color. */
+	if (!ln->style.mark_len)
+		return pager_common_read(view, ln->text, ln->style.type, NULL);
+
+	if (!diff_common_add_cell(&ctx, ln->style.indent, false))
+		return pager_common_read(view, ln->text, ln->style.type, NULL);
+	ctx.type = ln->style.mark_type;
+	if (!diff_common_add_cell(&ctx, ln->style.mark_len, false))
+		return pager_common_read(view, ln->text, ln->style.type, NULL);
+	ctx.type = ln->style.type;
+	if (!diff_common_add_cell(&ctx, strlen(ln->text) - ln->style.indent -
+				  ln->style.mark_len, false))
+		return pager_common_read(view, ln->text, ln->style.type, NULL);
+
+	return diff_common_add_line(view, ln->text, ln->style.type, &ctx) != NULL;
+}
+
+/* Draw a line which is not part of a refined block. */
+static bool
+refine_emit_styled_line(struct view *view, const char *text,
+			const struct refine_style *style)
+{
+	struct refine_line ln = {0};
+
+	ln.text = (char *) text;
+	ln.style = *style;
+
+	return refine_emit_plain(view, &ln);
 }
 
 static bool
 refine_emit_line(struct view *view, struct diff_refine *r,
 		 struct refine_line *ln)
 {
-	struct diff_stat_context ctx = { ln->text, ln->type };
-	enum line_type hi = (ln->type == LINE_DIFF_ADD || ln->type == LINE_DIFF_ADD2)
-			    ? LINE_DIFF_ADD_HIGHLIGHT : LINE_DIFF_DEL_HIGHLIGHT;
-	struct refine_token *toks = ln->added ? r->added : r->removed;
+	struct diff_stat_context ctx = { ln->text, ln->style.type };
+	struct refine_token *toks = ln->style.added ? r->added : r->removed;
 	bool ok = true;
 	int t;
 
-	if (ln->prefix)
-		ok = diff_common_add_cell(&ctx, ln->prefix, false);
+	if (ln->style.mark_len) {
+		ctx.type = LINE_DEFAULT;
+		ok = diff_common_add_cell(&ctx, ln->style.indent, false);
+		ctx.type = ln->style.mark_type;
+		if (ok)
+			ok = diff_common_add_cell(&ctx, ln->style.mark_len, false);
+		ctx.type = ln->style.type;
+		if (ok)
+			ok = diff_common_add_cell(&ctx, ln->style.prefix -
+						  ln->style.indent -
+						  ln->style.mark_len, false);
+	} else if (ln->style.prefix) {
+		ok = diff_common_add_cell(&ctx, ln->style.prefix, false);
+	}
 
 	for (t = 0; ok && t < ln->tok_count; ) {
 		struct refine_token *tok = &toks[ln->tok_first + t];
@@ -612,7 +1337,7 @@ refine_emit_line(struct view *view, struct diff_refine *r,
 			end = toks[ln->tok_first + t2].hi;
 			t2++;
 		}
-		ctx.type = shared ? ln->type : hi;
+		ctx.type = shared ? ln->style.type : ln->style.hi_type;
 		ok = diff_common_add_cell(&ctx, end - tok->lo, false);
 		t = t2;
 	}
@@ -621,7 +1346,7 @@ refine_emit_line(struct view *view, struct diff_refine *r,
 	if (!ok)
 		return refine_emit_plain(view, ln);
 
-	return diff_common_add_line(view, ln->text, ln->type, &ctx) != NULL;
+	return diff_common_add_line(view, ln->text, ln->style.type, &ctx) != NULL;
 }
 
 static void
@@ -664,7 +1389,8 @@ diff_refine_flush(struct view *view, struct diff_state *state)
 	 * highlighted, as diffr does.  The common subsequence is only needed when
 	 * both sides exist, and is skipped above the product guard to bound the
 	 * cost of the O(n*m) dynamic program on pathological blocks. */
-	refine = r->nremoved > 0 || r->nadded > 0;
+	refine = r->pair_only ? (r->nremoved > 0 && r->nadded > 0)
+			     : (r->nremoved > 0 || r->nadded > 0);
 	if (r->nremoved > 0 && r->nadded > 0) {
 		if ((unsigned long long) r->nremoved * r->nadded > REFINE_MAX_PRODUCT)
 			refine = false;
@@ -1580,6 +2306,18 @@ diff_read(struct view *view, struct buffer *buf, bool force_stop)
 			return false;
 		}
 
+		/* Chain the remaining base diff sections. */
+		if (state->bdiff && state->bdiff_next < state->bdiff_planned && !force_stop) {
+			enum status_code code = diff_bdiff_load_section(view, state, 0);
+
+			if (code != SUCCESS) {
+				report("%s", get_status_message(code));
+				return true;
+			}
+
+			return false;
+		}
+
 		/* Fall back to retry if no diff will be shown. */
 		if (view->lines == 0 && opt_file_args) {
 			int pos = argv_size(view->argv)
@@ -1623,6 +2361,13 @@ diff_read(struct view *view, struct buffer *buf, bool force_stop)
 		}
 
 		return true;
+	}
+
+	if (state->bdiff) {
+		struct bdiff_section *section = diff_bdiff_section_at(state, view->lines);
+
+		if (section && section->kind == BDIFF_SECTION_RANGE)
+			return diff_bdiff_read_range(view, state, buf->data);
 	}
 
 	return diff_common_read(view, buf->data, state);
@@ -1863,9 +2608,13 @@ diff_request(struct view *view, enum request request, struct line *line)
 		return diff_trace_origin(view, request, line);
 
 	case REQ_EDIT:
+		if (((struct diff_state *) view->private)->bdiff)
+			return diff_bdiff_edit(view, view->private, line, false);
 		return diff_common_edit(view, request, line);
 
 	case REQ_EDIT_BLOB:
+		if (((struct diff_state *) view->private)->bdiff)
+			return diff_bdiff_edit(view, view->private, line, true);
 		return diff_edit_blob(view, line);
 
 	case REQ_ENTER:

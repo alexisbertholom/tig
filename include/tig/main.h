@@ -17,6 +17,7 @@
 #include "tig/view.h"
 #include "tig/graph.h"
 #include "tig/util.h"
+#include "tig/bdiff.h"
 
 struct commit {
 	char id[SIZEOF_REV];		/* SHA1 ID. */
@@ -24,6 +25,7 @@ struct commit {
 	struct time author_time;	/* Date from the author ident. */
 	const struct ident *committer;	/* Committer. */
 	struct time commit_time;	/* Date from the committer ident. */
+	enum bdiff_state bdiff;		/* How the commit compares to --bdiff. */
 	struct graph_canvas graph;	/* Ancestry chain graphics. */
 	char title[1];			/* First line of the commit message. */
 };

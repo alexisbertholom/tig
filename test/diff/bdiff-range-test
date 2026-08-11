@@ -1,0 +1,89 @@
+#!/bin/sh
+#
+# Test the range diff shown for a modified commit by `tig --bdiff`.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=20
+
+tigrc <<EOF
+set line-graphics = ascii
+set diff-view = line-number:no text
+set diff-highlight = internal
+EOF
+
+steps '
+	:enter
+	:maximize
+	:save-display bdiff-range.screen
+'
+
+setup_bdiff_range_repo()
+{
+	git_init .
+
+	file f "one
+two
+three
+four
+five
+six
+seven
+"
+	git add f
+	git_commit -m "Base"
+
+	# The patch both versions share: an added line and a deleted one.
+	# The previous version drops "four" and keeps "six", the current one
+	# does the opposite, and each ends with a line of its own.
+	file f "one
+ADDED
+two
+five
+six
+seven
+TAIL previous
+"
+	git add f
+	git_commit -m "Patch"
+
+	git branch old
+
+	file f "one
+ADDED
+two
+four
+five
+seven
+TAIL current
+"
+	git add f
+	GIT_COMMITTER_DATE="Sat Apr 4 13:29:36 2015 +0200" git commit -q --amend --no-edit
+}
+
+in_work_dir setup_bdiff_range_repo
+
+test_tig --bdiff old
+
+assert_equals 'bdiff-range.screen' <<EOF
+[change] range diff
+    @@ f
+     +ADDED
+      two
+     -three
+    --four
+    + four
+      five
+    - six
+    +-six
+      seven
+    -+TAIL previous
+    ++TAIL current
+ 
+[change] commit 7cd87a725d60260a373ef35035a3e9ffc5b9969a
+commit 7cd87a725d60260a373ef35035a3e9ffc5b9969a
+Refs: [master]
+Author:     Committer <c.ommitter@example.net>
+[diff] 7cd87a725d60260a373ef35035a3e9ffc5b9969a - line 1 of 69               26%
+EOF

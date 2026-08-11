@@ -364,6 +364,7 @@ TIG_OBJS = \
 	src/status.o \
 	src/stage.o \
 	src/main.o \
+	src/bdiff.o \
 	src/stash.o \
 	src/grep.o \
 	src/ui.o \

@@ -463,6 +463,42 @@ color help-group		blue	default
 color help-action		yellow	default
 color diff-stat			blue	default
 color diff-stat-header		blue	default	bold
+# Base diff (tig --bdiff) commit markers.  The [change] and [move-change]
+# markers use a 256-color orange; on a terminal with fewer colors they fall
+# back to the default foreground color.
+color bdiff-add			green	default
+color bdiff-del			red	default
+color bdiff-move		yellow	default
+color bdiff-from		color244 default
+color bdiff-change		color208 default
+color bdiff-same		white	default
+color bdiff-move-change		color208 default	bold
+color bdiff-section		cyan	default	bold
+# The range diff of a base diff compares two patches, so each of its lines
+# carries two markers: the outer one tells which patch the line belongs to, the
+# inner one what that patch does to the file.  The color follows the inner
+# marker, the attribute the outer one: dim for the previous patch, bold for the
+# current one and neither for what both patches have in common.
+color bdiff-range-old-mark		red	default	reverse
+color bdiff-range-new-mark		green	default	reverse
+color bdiff-range-both-context		default	default
+color bdiff-range-both-del		red	default
+color bdiff-range-both-add		green	default
+color bdiff-range-both-chunk		cyan	default
+color bdiff-range-old-context		default	default	dim
+color bdiff-range-old-del		red	default	dim
+color bdiff-range-old-add		green	default	dim
+color bdiff-range-old-chunk		cyan	default	dim
+color bdiff-range-new-context		default	default	bold
+color bdiff-range-new-del		red	default	bold
+color bdiff-range-new-add		green	default	bold
+color bdiff-range-new-chunk		cyan	default	bold
+color bdiff-range-old-context-highlight	default	default	dim standout
+color bdiff-range-old-del-highlight	red	default	dim standout
+color bdiff-range-old-add-highlight	green	default	dim standout
+color bdiff-range-new-context-highlight	default	default	bold standout
+color bdiff-range-new-del-highlight	red	default	bold standout
+color bdiff-range-new-add-highlight	green	default	bold standout
 color diff-add-highlight	green	default	standout
 color diff-del-highlight	red	default	standout
 color palette-0			magenta	default

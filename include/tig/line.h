@@ -90,6 +90,34 @@ struct ref;
 	_(HELP_TOGGLE,		""), \
 	_(DIFF_STAT,		""), \
 	_(DIFF_STAT_HEADER,	""), \
+	_(BDIFF_ADD,		""), \
+	_(BDIFF_DEL,		""), \
+	_(BDIFF_MOVE,		""), \
+	_(BDIFF_FROM,		""), \
+	_(BDIFF_CHANGE,		""), \
+	_(BDIFF_SAME,		""), \
+	_(BDIFF_MOVE_CHANGE,	""), \
+	_(BDIFF_SECTION,	""), \
+	_(BDIFF_RANGE_OLD_MARK,	""), \
+	_(BDIFF_RANGE_NEW_MARK,	""), \
+	_(BDIFF_RANGE_BOTH_CONTEXT,	""), \
+	_(BDIFF_RANGE_BOTH_DEL,	""), \
+	_(BDIFF_RANGE_BOTH_ADD,	""), \
+	_(BDIFF_RANGE_BOTH_CHUNK,	""), \
+	_(BDIFF_RANGE_OLD_CONTEXT,	""), \
+	_(BDIFF_RANGE_OLD_DEL,	""), \
+	_(BDIFF_RANGE_OLD_ADD,	""), \
+	_(BDIFF_RANGE_OLD_CHUNK,	""), \
+	_(BDIFF_RANGE_NEW_CONTEXT,	""), \
+	_(BDIFF_RANGE_NEW_DEL,	""), \
+	_(BDIFF_RANGE_NEW_ADD,	""), \
+	_(BDIFF_RANGE_NEW_CHUNK,	""), \
+	_(BDIFF_RANGE_OLD_CONTEXT_HIGHLIGHT,	""), \
+	_(BDIFF_RANGE_OLD_DEL_HIGHLIGHT,	""), \
+	_(BDIFF_RANGE_OLD_ADD_HIGHLIGHT,	""), \
+	_(BDIFF_RANGE_NEW_CONTEXT_HIGHLIGHT,	""), \
+	_(BDIFF_RANGE_NEW_DEL_HIGHLIGHT,	""), \
+	_(BDIFF_RANGE_NEW_ADD_HIGHLIGHT,	""), \
 	_(PALETTE_0,		""), \
 	_(PALETTE_1,		""), \
 	_(PALETTE_2,		""), \

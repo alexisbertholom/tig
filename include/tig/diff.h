@@ -15,10 +15,30 @@
 #define TIG_DIFF_H
 
 #include "tig/view.h"
+#include "tig/bdiff.h"
 
 struct diff_refine;
 struct diff_stat_group;
 struct diff_stat_rows;
+
+/*
+ * A --bdiff commit is shown as a sequence of sections: what changed besides
+ * the patch, the diff between the two patches, and the patch of each side.
+ */
+enum bdiff_section_kind {
+	BDIFF_SECTION_META,
+	BDIFF_SECTION_RANGE,
+	BDIFF_SECTION_NEW,
+	BDIFF_SECTION_OLD,
+};
+
+struct bdiff_section {
+	enum bdiff_section_kind kind;
+	unsigned long start;		/* First line of the section. */
+	const char *id;			/* Commit the section shows. */
+};
+
+#define BDIFF_SECTIONS 4
 
 struct diff_state {
 	bool after_commit_title;
@@ -38,6 +58,19 @@ struct diff_state {
 	struct diff_refine *refine;
 	struct diff_stat_group *stat_group;
 	struct diff_stat_rows *stat_rows;
+
+	/* Base diff state. */
+	const struct bdiff_commit *bdiff;
+	struct bdiff_section bdiff_section[BDIFF_SECTIONS];
+	int bdiff_sections;		/* Sections added so far. */
+	int bdiff_planned;		/* Sections still to be loaded. */
+	enum bdiff_section_kind bdiff_plan[BDIFF_SECTIONS];
+	int bdiff_next;			/* Next section of the plan. */
+	int bdiff_range_inner;		/* Inner marker of the buffered block. */
+	char bdiff_new_id[SIZEOF_REV];
+	char bdiff_old_id[SIZEOF_REV];
+	char bdiff_new_arg[SIZEOF_REV + 2];
+	char bdiff_old_arg[SIZEOF_REV + 2];
 };
 
 enum request diff_common_edit(struct view *view, enum request request, struct line *line);

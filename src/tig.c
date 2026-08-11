@@ -34,6 +34,8 @@
 #include "tig/display.h"
 #include "tig/prompt.h"
 
+#include "tig/bdiff.h"
+
 /* Views. */
 #include "tig/blame.h"
 #include "tig/blob.h"
@@ -404,6 +406,7 @@ static const char usage_string[] =
 "   or: tig <      [git command output]\n"
 "\n"
 "Options:\n"
+"  --bdiff <rev>   Compare HEAD to <rev> commit by commit\n"
 "  +<number>       Select line <number> in the first view\n"
 "  -v, --version   Show version and exit\n"
 "  -h, --help      Show help message and exit\n"
@@ -494,6 +497,8 @@ filter_options(const char *argv[], enum request request)
 
 	filter_rev_parse(&opt_rev_args, "--symbolic", "--revs-only", argv);
 }
+
+static const char *opt_bdiff_rev;
 
 static enum request
 parse_options(int argc, const char *argv[], bool pager_mode)
@@ -588,6 +593,18 @@ parse_options(int argc, const char *argv[], bool pager_mode)
 			} else if (!strcmp(opt, "-h") || !strcmp(opt, "--help")) {
 				printf("%s\n", usage_string);
 				exit(EXIT_SUCCESS);
+
+			} else if (!strcmp(opt, "--bdiff")) {
+				if (i + 1 >= argc)
+					usage("Option --bdiff requires a revision");
+				opt_bdiff_rev = argv[++i];
+				continue;
+
+			} else if (!prefixcmp(opt, "--bdiff=")) {
+				opt_bdiff_rev = opt + STRING_SIZE("--bdiff=");
+				if (!*opt_bdiff_rev)
+					usage("Option --bdiff requires a revision");
+				continue;
 
 			} else if (strlen(opt) >= 2 && *opt == '+' && string_isnumber(opt + 1)) {
 				int lineno = atoi(opt + 1);
@@ -888,6 +905,11 @@ main(int argc, const char *argv[])
 	}
 
 	die_if_failed(load_refs(false), "Failed to load refs.");
+
+	/* Classify the commits before the display is initialized, so that a
+	 * bad revision is reported on the terminal instead of in a view. */
+	if (opt_bdiff_rev)
+		bdiff_load(opt_bdiff_rev);
 
 	init_display();
 

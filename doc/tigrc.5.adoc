@@ -1137,6 +1137,52 @@ setting the *default* color option.
 |main-other		|Label of any other reference.
 |=============================================================================
 
+.Base diff colors
+[frame="none",grid="none",cols="25<m,75<"]
+|=============================================================================
+|bdiff-add		|Marker of a commit which only exists on HEAD.
+|bdiff-del		|Marker of a commit which is gone from HEAD.
+|bdiff-move		|Marker of a reordered commit.
+|bdiff-from		|Marker of where a reordered commit used to be.
+|bdiff-change		|Marker of a modified commit.
+|bdiff-same		|Marker of an unchanged commit.
+|bdiff-move-change	|Marker of a commit both reordered and modified.
+|bdiff-section		|Heading of a section of the base diff view.
+|=============================================================================
+
+.Base diff range colors
+[frame="none",grid="none",cols="35<m,65<"]
+|=============================================================================
+|The range diff compares two patches, so each of its lines carries two
+|markers: the outer one tells which patch the line belongs to, the inner one
+|what that patch does to the file. The color follows the inner marker, the
+|attribute the outer one.
+|=============================================================================
+
+[frame="none",grid="none",cols="35<m,65<"]
+|=============================================================================
+|bdiff-range-old-mark	|Marker of a line of the previous patch.
+|bdiff-range-new-mark	|Marker of a line of the current patch.
+|bdiff-range-both-context	|Context line both patches have.
+|bdiff-range-both-del	|Deletion both patches make.
+|bdiff-range-both-add	|Addition both patches make.
+|bdiff-range-both-chunk	|Chunk header both patches have.
+|bdiff-range-old-context	|Context line only the previous patch had.
+|bdiff-range-old-del	|Deletion only the previous patch made.
+|bdiff-range-old-add	|Addition only the previous patch made.
+|bdiff-range-old-chunk	|Chunk header only the previous patch had.
+|bdiff-range-new-context	|Context line only the current patch has.
+|bdiff-range-new-del	|Deletion only the current patch makes.
+|bdiff-range-new-add	|Addition only the current patch makes.
+|bdiff-range-new-chunk	|Chunk header only the current patch has.
+|bdiff-range-old-context-highlight	|What changed in a context line of the previous patch.
+|bdiff-range-old-del-highlight	|What changed in a deletion of the previous patch.
+|bdiff-range-old-add-highlight	|What changed in an addition of the previous patch.
+|bdiff-range-new-context-highlight	|What changed in a context line of the current patch.
+|bdiff-range-new-del-highlight	|What changed in a deletion of the current patch.
+|bdiff-range-new-add-highlight	|What changed in an addition of the current patch.
+|=============================================================================
+
 .Status view
 [frame="none",grid="none",cols="25<m,75<"]
 |=============================================================================
