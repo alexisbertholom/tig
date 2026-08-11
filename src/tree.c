@@ -337,10 +337,15 @@ open_blob_editor(const char *id, const char *name, unsigned int lineno)
 {
 	const char *blob_argv[] = { "git", "cat-file", "blob", id, NULL };
 	char file[SIZEOF_STR];
+	const char *sep;
 	int fd;
 
 	if (!name)
 		name = "unknown";
+	/* The temporary file is created in a single directory, so only the
+	 * last component of the path can be kept. */
+	else if ((sep = strrchr(name, '/')))
+		name = sep + 1;
 
 	if (!string_format(file, "%s/tigblob.XXXXXX.%s", get_temp_dir(), name)) {
 		report("Temporary file name is too long");
