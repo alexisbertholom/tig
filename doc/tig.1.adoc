@@ -72,9 +72,10 @@ stash::
 grep::
 	Open the grep view. Supports the same options as git-grep(1).
 
---bdiff <rev>::
+--bdiff [<rev>]::
 	Compare the history of HEAD with the one of <rev>, commit by commit,
-	starting from their common ancestor. See the "BASE DIFF" section.
+	starting from their common ancestor. Without <rev>, the upstream of
+	the current branch is used. See the "BASE DIFF" section.
 
 --bdiff-base <rev>::
 	Compare from <rev> instead of the common ancestor of HEAD and the
@@ -139,7 +140,8 @@ BASE DIFF
 
 When started with '--bdiff <rev>', Tig compares the history of HEAD with the
 one of <rev>, commit by commit, starting from their common ancestor, the way
-git-range-diff(1) does. '--bdiff-base' compares from another commit instead,
+git-range-diff(1) does. Without <rev>, HEAD is compared with its upstream,
+which tells what a rewrite did to the branch since it was last pushed. '--bdiff-base' compares from another commit instead,
 for when the best common ancestor is not the one the history was written
 against. The main view shows the history of HEAD, with every
 commit of the compared range marked by how it relates to <rev>:
@@ -200,6 +202,11 @@ and `bdiff-section` color names, and those of the range diff with the
 
 EXAMPLES
 --------
+
+Compare the current branch with the way it was pushed:
+-----------------------------------------------------------------------------
+$ tig --bdiff
+-----------------------------------------------------------------------------
 
 Compare the current branch with the way it was before a rebase:
 -----------------------------------------------------------------------------

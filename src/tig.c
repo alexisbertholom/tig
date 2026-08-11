@@ -406,7 +406,7 @@ static const char usage_string[] =
 "   or: tig <      [git command output]\n"
 "\n"
 "Options:\n"
-"  --bdiff <rev>   Compare HEAD to <rev> commit by commit\n"
+"  --bdiff [<rev>] Compare HEAD to <rev>, or to its upstream, commit by commit\n"
 "  --bdiff-base <rev>\n"
 "                  Compare from <rev> instead of the common ancestor\n"
 "  +<number>       Select line <number> in the first view\n"
@@ -598,9 +598,12 @@ parse_options(int argc, const char *argv[], bool pager_mode)
 				exit(EXIT_SUCCESS);
 
 			} else if (!strcmp(opt, "--bdiff")) {
-				if (i + 1 >= argc)
-					usage("Option --bdiff requires a revision");
-				opt_bdiff_rev = argv[++i];
+				/* The revision is optional; without one the
+				 * upstream of the current branch is used. */
+				if (i + 1 < argc && *argv[i + 1] != '-')
+					opt_bdiff_rev = argv[++i];
+				else
+					opt_bdiff_rev = "";
 				continue;
 
 			} else if (!prefixcmp(opt, "--bdiff=")) {

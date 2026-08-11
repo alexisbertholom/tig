@@ -747,6 +747,16 @@ bdiff_load(const char *rev, const char *base)
 	if (!repo.head_id[0])
 		die("--bdiff needs a HEAD to compare against");
 
+	/* Comparing a rewritten branch with the version it was pushed as is
+	 * the common case, so the upstream is what is compared against when
+	 * no revision is given. */
+	if (!rev || !*rev) {
+		if (!repo.upstream[0])
+			die("%s has no upstream branch; please name the revision to compare with",
+			    repo.head[0] ? repo.head : "HEAD");
+		rev = repo.upstream;
+	}
+
 	bdiff_resolve(rev, base);
 
 	bdiff.active = true;
