@@ -702,10 +702,9 @@ bdiff_plan_injections(void)
 }
 
 static void
-bdiff_resolve(const char *rev)
+bdiff_resolve_commit(const char *rev, char id[SIZEOF_REV])
 {
-	const char *rev_parse_argv[] = { "git", "rev-parse", "--verify", "--quiet", rev, NULL };
-	const char *merge_base_argv[] = { "git", "merge-base", "HEAD", bdiff.rev, NULL };
+	const char *rev_parse_argv[] = { "git", "rev-parse", "--verify", "--quiet", NULL, NULL };
 	char buf[SIZEOF_STR] = "";
 	char spec[SIZEOF_STR];
 
@@ -715,7 +714,25 @@ bdiff_resolve(const char *rev)
 
 	if (!io_run_buf(rev_parse_argv, buf, sizeof(buf), NULL, false) || !*buf)
 		die("Not a valid commit: %s", rev);
-	string_copy_rev(bdiff.rev, buf);
+
+	string_copy_rev(id, buf);
+}
+
+static void
+bdiff_resolve(const char *rev, const char *base)
+{
+	const char *merge_base_argv[] = { "git", "merge-base", "HEAD", bdiff.rev, NULL };
+	char buf[SIZEOF_STR] = "";
+
+	bdiff_resolve_commit(rev, bdiff.rev);
+
+	/* The commit the two sides are compared from is theirs to pick: the
+	 * best common ancestor is not always the one the history was written
+	 * against. */
+	if (base) {
+		bdiff_resolve_commit(base, bdiff.base);
+		return;
+	}
 
 	if (!io_run_buf(merge_base_argv, buf, sizeof(buf), NULL, false) || !*buf)
 		die("%s and HEAD have no common ancestor", rev);
@@ -723,14 +740,14 @@ bdiff_resolve(const char *rev)
 }
 
 void
-bdiff_load(const char *rev)
+bdiff_load(const char *rev, const char *base)
 {
 	bool merges;
 
 	if (!repo.head_id[0])
 		die("--bdiff needs a HEAD to compare against");
 
-	bdiff_resolve(rev);
+	bdiff_resolve(rev, base);
 
 	bdiff.active = true;
 

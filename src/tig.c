@@ -407,6 +407,8 @@ static const char usage_string[] =
 "\n"
 "Options:\n"
 "  --bdiff <rev>   Compare HEAD to <rev> commit by commit\n"
+"  --bdiff-base <rev>\n"
+"                  Compare from <rev> instead of the common ancestor\n"
 "  +<number>       Select line <number> in the first view\n"
 "  -v, --version   Show version and exit\n"
 "  -h, --help      Show help message and exit\n"
@@ -499,6 +501,7 @@ filter_options(const char *argv[], enum request request)
 }
 
 static const char *opt_bdiff_rev;
+static const char *opt_bdiff_base;
 
 static enum request
 parse_options(int argc, const char *argv[], bool pager_mode)
@@ -604,6 +607,18 @@ parse_options(int argc, const char *argv[], bool pager_mode)
 				opt_bdiff_rev = opt + STRING_SIZE("--bdiff=");
 				if (!*opt_bdiff_rev)
 					usage("Option --bdiff requires a revision");
+				continue;
+
+			} else if (!strcmp(opt, "--bdiff-base")) {
+				if (i + 1 >= argc)
+					usage("Option --bdiff-base requires a revision");
+				opt_bdiff_base = argv[++i];
+				continue;
+
+			} else if (!prefixcmp(opt, "--bdiff-base=")) {
+				opt_bdiff_base = opt + STRING_SIZE("--bdiff-base=");
+				if (!*opt_bdiff_base)
+					usage("Option --bdiff-base requires a revision");
 				continue;
 
 			} else if (strlen(opt) >= 2 && *opt == '+' && string_isnumber(opt + 1)) {
@@ -908,8 +923,10 @@ main(int argc, const char *argv[])
 
 	/* Classify the commits before the display is initialized, so that a
 	 * bad revision is reported on the terminal instead of in a view. */
+	if (opt_bdiff_base && !opt_bdiff_rev)
+		die("Option --bdiff-base requires --bdiff");
 	if (opt_bdiff_rev)
-		bdiff_load(opt_bdiff_rev);
+		bdiff_load(opt_bdiff_rev, opt_bdiff_base);
 
 	init_display();
 

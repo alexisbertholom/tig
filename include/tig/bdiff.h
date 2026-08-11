@@ -57,7 +57,7 @@ struct bdiff_commit {
 };
 
 bool bdiff_is_active(void);
-void bdiff_load(const char *rev);
+void bdiff_load(const char *rev, const char *base);
 
 const struct bdiff_commit *bdiff_lookup(const char *id);
 bool bdiff_parents_differ(const struct bdiff_commit *new_commit, const struct bdiff_commit *old_commit);

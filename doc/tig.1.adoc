@@ -76,6 +76,10 @@ grep::
 	Compare the history of HEAD with the one of <rev>, commit by commit,
 	starting from their common ancestor. See the "BASE DIFF" section.
 
+--bdiff-base <rev>::
+	Compare from <rev> instead of the common ancestor of HEAD and the
+	revision given to '--bdiff'.
+
 +<number>::
     Show the first view with line <number> visible and selected.
 
@@ -135,7 +139,9 @@ BASE DIFF
 
 When started with '--bdiff <rev>', Tig compares the history of HEAD with the
 one of <rev>, commit by commit, starting from their common ancestor, the way
-git-range-diff(1) does. The main view shows the history of HEAD, with every
+git-range-diff(1) does. '--bdiff-base' compares from another commit instead,
+for when the best common ancestor is not the one the history was written
+against. The main view shows the history of HEAD, with every
 commit of the compared range marked by how it relates to <rev>:
 
 [add]::
