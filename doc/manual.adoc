@@ -503,6 +503,8 @@ Prompt
 			 to goto the current commit's 2nd parent or
 			 `:goto some/branch` to goto the commit denoting the
 			 branch `some/branch`.
+|:bdiff [<rev>]		|Compare the history of HEAD with the one of <rev>,
+			 or with its upstream, the way `--bdiff` does.
 |:save-display <file>	|Save current display to `<file>`.
 |:save-options <file>	|Save current options to `<file>`.
 |:save-view <file>	|Save view info to `<file>` (for testing purposes).

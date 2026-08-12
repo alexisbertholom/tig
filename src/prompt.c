@@ -20,6 +20,8 @@
 #include "tig/prompt.h"
 #include "tig/pager.h"
 #include "tig/types.h"
+#include "tig/main.h"
+#include "tig/bdiff.h"
 
 #ifdef HAVE_READLINE
 #include <readline/readline.h>
@@ -264,6 +266,7 @@ readline_action_generator(const char *text, int state)
 		"set",
 		"toggle",
 		"goto",
+		"bdiff",
 		"save-display",
 		"save-options",
 		"exec",
@@ -1005,6 +1008,19 @@ run_prompt_command(struct view *view, const char *argv[])
 			report("goto requires an argument");
 		else
 			goto_id(view, argv[1], true, true);
+		return REQ_NONE;
+
+	} else if (!strcmp(cmd, "bdiff")) {
+		enum status_code code = bdiff_load(argv[1], bdiff_base_spec(),
+						   bdiff_onto_spec());
+
+		if (code != SUCCESS) {
+			report("%s", get_status_message(code));
+		} else {
+			if (main_view.lines)
+				reload_view(&main_view);
+			report("Comparing with %s", bdiff_rev_spec());
+		}
 		return REQ_NONE;
 
 	} else if (!strcmp(cmd, "echo")) {

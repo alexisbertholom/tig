@@ -42,6 +42,10 @@ static struct {
 	char rev[SIZEOF_REV];		/* Revision to compare against. */
 	char base[SIZEOF_REV];		/* Commit HEAD is compared from. */
 	char old_base[SIZEOF_REV];	/* Commit the revision is compared from. */
+	char head[SIZEOF_REV];		/* HEAD when the history was classified. */
+	const char *rev_spec;		/* What was asked for, to classify again. */
+	const char *base_spec;
+	const char *onto_spec;
 	struct bdiff_side new_side;	/* Commits of HEAD. */
 	struct bdiff_side old_side;	/* Commits of the other revision. */
 } bdiff;
@@ -68,6 +72,24 @@ const char *
 bdiff_rev(void)
 {
 	return bdiff.rev;
+}
+
+const char *
+bdiff_rev_spec(void)
+{
+	return bdiff.rev_spec;
+}
+
+const char *
+bdiff_base_spec(void)
+{
+	return bdiff.base_spec;
+}
+
+const char *
+bdiff_onto_spec(void)
+{
+	return bdiff.onto_spec;
 }
 
 const char *
@@ -265,7 +287,7 @@ bdiff_add_commit(struct bdiff_side *side, bool old_side, const char *id, const c
  * records introduced by a marker line, so that multi-line messages are
  * handled without a terminator that could occur in the message itself.
  */
-static bool
+static enum status_code
 bdiff_harvest(struct bdiff_side *side, bool old_side, const char *base, const char *tip)
 {
 	char range[SIZEOF_STR];
@@ -280,10 +302,10 @@ bdiff_harvest(struct bdiff_side *side, bool old_side, const char *base, const ch
 	struct io io;
 
 	if (!string_format(range, "%s..%s", base, tip))
-		die("Failed to format the %s range", old_side ? "compared" : "current");
+		return error("Failed to name the range of %s", tip);
 
 	if (!io_run(&io, IO_RD, NULL, NULL, log_argv))
-		die("Failed to read the commits of %s", tip);
+		return error("Failed to read the commits of %s", tip);
 
 	while (io_get(&io, &buf, '\n', true)) {
 		char *line = buf.data;
@@ -330,10 +352,12 @@ bdiff_harvest(struct bdiff_side *side, bool old_side, const char *base, const ch
 
 	if (io_error(&io)) {
 		io_done(&io);
-		die("Failed to read the commits of %s", tip);
+		return error("Failed to read the commits of %s", tip);
 	}
 
-	return io_done(&io);
+	io_done(&io);
+
+	return SUCCESS;
 }
 
 static struct bdiff_commit *
@@ -467,7 +491,7 @@ bdiff_count_merges(const char *base, const char *tip)
 	return atoi(buf) > 0;
 }
 
-static void
+static enum status_code
 bdiff_pair_commits(bool with_merges)
 {
 	char old_range[SIZEOF_STR], new_range[SIZEOF_STR];
@@ -478,7 +502,7 @@ bdiff_pair_commits(bool with_merges)
 
 	if (!string_format(old_range, "%s..%s", bdiff.old_base, bdiff.rev) ||
 	    !string_format(new_range, "%s..%s", bdiff.base, repo.head_id))
-		die("Failed to format the compared ranges");
+		return error("Failed to name the compared ranges");
 
 	argv[argc++] = "git";
 	argv[argc++] = "range-diff";
@@ -492,7 +516,7 @@ bdiff_pair_commits(bool with_merges)
 	argv[argc] = NULL;
 
 	if (!io_run(&io, IO_RD, NULL, NULL, argv))
-		die("Failed to run git range-diff");
+		return error("Failed to run git range-diff");
 
 	while (io_get(&io, &buf, '\n', true))
 		bdiff_parse_pairing(buf.data);
@@ -500,10 +524,12 @@ bdiff_pair_commits(bool with_merges)
 	io_done(&io);
 
 	if (io.status && with_merges)
-		die("git range-diff failed; --bdiff needs a git version supporting\n"
-		    "'--diff-merges' to compare histories containing merge commits.");
+		return error("git range-diff failed; comparing histories containing merge "
+			     "commits needs a git version supporting '--diff-merges'");
 	if (io.status)
-		die("git range-diff failed with status %d", io.status);
+		return error("git range-diff failed with status %d", io.status);
+
+	return SUCCESS;
 }
 
 /*
@@ -702,7 +728,7 @@ bdiff_plan_injections(void)
 	}
 }
 
-static void
+static enum status_code
 bdiff_resolve_commit(const char *rev, char id[SIZEOF_REV])
 {
 	const char *rev_parse_argv[] = { "git", "rev-parse", "--verify", "--quiet", NULL, NULL };
@@ -710,38 +736,45 @@ bdiff_resolve_commit(const char *rev, char id[SIZEOF_REV])
 	char spec[SIZEOF_STR];
 
 	if (!string_format(spec, "%s^{commit}", rev))
-		die("Revision name is too long: %s", rev);
+		return error("Revision name is too long: %s", rev);
 	rev_parse_argv[4] = spec;
 
 	if (!io_run_buf(rev_parse_argv, buf, sizeof(buf), NULL, false) || !*buf)
-		die("Not a valid commit: %s", rev);
+		return error("Not a valid commit: %s", rev);
 
 	string_copy_rev(id, buf);
+
+	return SUCCESS;
 }
 
-static void
+static enum status_code
 bdiff_merge_base(const char *rev1, const char *rev2, char id[SIZEOF_REV])
 {
 	const char *merge_base_argv[] = { "git", "merge-base", rev1, rev2, NULL };
 	char buf[SIZEOF_STR] = "";
 
 	if (!io_run_buf(merge_base_argv, buf, sizeof(buf), NULL, false) || !*buf)
-		die("%s and %s have no common ancestor", rev1, rev2);
+		return error("%s and %s have no common ancestor", rev1, rev2);
 	string_copy_rev(id, buf);
+
+	return SUCCESS;
 }
 
-static void
+static enum status_code
 bdiff_resolve(const char *rev, const char *base, const char *onto)
 {
-	bdiff_resolve_commit(rev, bdiff.rev);
+	enum status_code code = bdiff_resolve_commit(rev, bdiff.rev);
+
+	if (code != SUCCESS)
+		return code;
 
 	/* The commit the two sides are compared from is theirs to pick: the
 	 * best common ancestor is not always the one the history was written
 	 * against. */
 	if (base) {
-		bdiff_resolve_commit(base, bdiff.base);
+		code = bdiff_resolve_commit(base, bdiff.base);
 		string_copy_rev(bdiff.old_base, bdiff.base);
-		return;
+		return code;
 	}
 
 	/* A rebase moves a branch onto a newer state of the branch it is
@@ -751,40 +784,82 @@ bdiff_resolve(const char *rev, const char *base, const char *onto)
 	if (onto) {
 		char onto_id[SIZEOF_REV];
 
-		bdiff_resolve_commit(onto, onto_id);
-		bdiff_merge_base(onto_id, repo.head_id, bdiff.base);
-		bdiff_merge_base(onto_id, bdiff.rev, bdiff.old_base);
-		return;
+		code = bdiff_resolve_commit(onto, onto_id);
+		if (code == SUCCESS)
+			code = bdiff_merge_base(onto_id, repo.head_id, bdiff.base);
+		if (code == SUCCESS)
+			code = bdiff_merge_base(onto_id, bdiff.rev, bdiff.old_base);
+		return code;
 	}
 
-	bdiff_merge_base("HEAD", bdiff.rev, bdiff.base);
+	code = bdiff_merge_base("HEAD", bdiff.rev, bdiff.base);
 	string_copy_rev(bdiff.old_base, bdiff.base);
+
+	return code;
 }
 
-void
+/*
+ * Forget the previous classification.  The commits themselves are kept: a
+ * view being loaded may still hold a pointer to one of them, and the history
+ * only gets classified again when it changed, so at most a handful of them
+ * pile up.
+ */
+static void
+bdiff_reset(void)
+{
+	string_map_clear(&bdiff_commits);
+	string_map_clear(&bdiff_anchors);
+
+	bdiff.new_side.commit = NULL;
+	bdiff.new_side.commits = 0;
+	bdiff.old_side.commit = NULL;
+	bdiff.old_side.commits = 0;
+}
+
+static const char *
+bdiff_keep(const char *spec)
+{
+	return spec && *spec ? bdiff_strdup(spec) : NULL;
+}
+
+enum status_code
 bdiff_load(const char *rev, const char *base, const char *onto)
 {
+	enum status_code code;
 	bool merges;
 
 	if (!repo.head_id[0])
-		die("--bdiff needs a HEAD to compare against");
+		return error("There is no HEAD to compare against");
 
 	/* Comparing a rewritten branch with the version it was pushed as is
 	 * the common case, so the upstream is what is compared against when
 	 * no revision is given. */
 	if (!rev || !*rev) {
 		if (!repo.upstream[0])
-			die("%s has no upstream branch; please name the revision to compare with",
-			    repo.head[0] ? repo.head : "HEAD");
+			return error("%s has no upstream branch; please name the revision to compare with",
+				     repo.head[0] ? repo.head : "HEAD");
 		rev = repo.upstream;
 	}
 
-	bdiff_resolve(rev, base, onto);
+	code = bdiff_resolve(rev, base, onto);
+	if (code != SUCCESS)
+		return code;
 
+	bdiff_reset();
+
+	/* Remember what was asked for, to classify the history again once it
+	 * has changed under us. */
+	bdiff.rev_spec = bdiff_keep(rev);
+	bdiff.base_spec = bdiff_keep(base);
+	bdiff.onto_spec = bdiff_keep(onto);
+	string_copy_rev(bdiff.head, repo.head_id);
 	bdiff.active = true;
 
-	bdiff_harvest(&bdiff.old_side, true, bdiff.old_base, bdiff.rev);
-	bdiff_harvest(&bdiff.new_side, false, bdiff.base, repo.head_id);
+	code = bdiff_harvest(&bdiff.old_side, true, bdiff.old_base, bdiff.rev);
+	if (code == SUCCESS)
+		code = bdiff_harvest(&bdiff.new_side, false, bdiff.base, repo.head_id);
+	if (code != SUCCESS)
+		return code;
 
 	merges = bdiff_count_merges(bdiff.old_base, bdiff.rev) ||
 		 bdiff_count_merges(bdiff.base, repo.head_id);
@@ -792,12 +867,27 @@ bdiff_load(const char *rev, const char *base, const char *onto)
 	/* git-range-diff refuses an empty range; with only one side left
 	 * there is nothing to pair anyway. */
 	if (bdiff.old_side.commits && bdiff.new_side.commits) {
-		bdiff_pair_commits(merges);
+		code = bdiff_pair_commits(merges);
+		if (code != SUCCESS)
+			return code;
 		bdiff_rescue_pairs();
 	}
 
 	bdiff_classify();
 	bdiff_plan_injections();
+
+	return SUCCESS;
 }
 
-/* vim: set ts=8 sw=8 noexpandtab: */
+/*
+ * Classify the history again when it changed, so that the markers keep
+ * describing the commits they are drawn on.
+ */
+enum status_code
+bdiff_refresh(void)
+{
+	if (!bdiff.active || !strncmp(bdiff.head, repo.head_id, SIZEOF_REV - 1))
+		return SUCCESS;
+
+	return bdiff_load(bdiff.rev_spec, bdiff.base_spec, bdiff.onto_spec);
+}

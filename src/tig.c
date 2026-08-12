@@ -945,8 +945,13 @@ main(int argc, const char *argv[])
 		die("Options --bdiff-base and --bdiff-onto require --bdiff");
 	if (opt_bdiff_base && opt_bdiff_onto)
 		die("Options --bdiff-base and --bdiff-onto are mutually exclusive");
-	if (opt_bdiff_rev)
-		bdiff_load(opt_bdiff_rev, opt_bdiff_base, opt_bdiff_onto);
+	if (opt_bdiff_rev) {
+		enum status_code code = bdiff_load(opt_bdiff_rev, opt_bdiff_base,
+						   opt_bdiff_onto);
+
+		if (code != SUCCESS)
+			die("%s", get_status_message(code));
+	}
 
 	init_display();
 

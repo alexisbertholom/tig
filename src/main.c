@@ -360,6 +360,7 @@ main_open(struct view *view, enum open_flags flags)
 {
 	struct main_state *state = view->private;
 	struct view_column *commit_title_column = get_view_column(view, VIEW_COLUMN_COMMIT_TITLE);
+	enum status_code bdiff_code = bdiff_refresh();
 	enum graph_display graph_display = main_with_graph(view, commit_title_column, flags);
 	/* A fresh open resets "load more"; a reload keeps it so the -n override
 	 * sticks.  view->load_more (not state->) survives because load_view()
@@ -405,6 +406,11 @@ main_open(struct view *view, enum open_flags flags)
 		if (code != SUCCESS)
 			return code;
 	}
+
+	/* The history moved under a base diff; the commits are still listed,
+	 * only the markers are missing. */
+	if (bdiff_code != SUCCESS)
+		report("%s", get_status_message(bdiff_code));
 
 	/* Record the -n limit (if any) so the title can flag a short load and
 	 * REQ_LOAD_MORE knows there is more to load; cleared once loading all. */

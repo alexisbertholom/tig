@@ -150,6 +150,11 @@ which tells what a rewrite did to the branch since it was last pushed. '--bdiff-
 for when the best common ancestor is not the one the history was written
 against.
 
+The comparison can also be started, and pointed at another revision, from the
+prompt with `:bdiff [<rev>]`. It keeps up with the history: rewriting it while
+Tig is open and refreshing the view classifies the commits again, against the
+new HEAD.
+
 A rebase moves a branch onto a newer state of the branch it is meant to be
 merged into, so the two sides no longer start at the same commit and
 everything the rebase pulled in shows up as added. '--bdiff-onto <branch>'

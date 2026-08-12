@@ -57,7 +57,8 @@ struct bdiff_commit {
 };
 
 bool bdiff_is_active(void);
-void bdiff_load(const char *rev, const char *base, const char *onto);
+enum status_code bdiff_load(const char *rev, const char *base, const char *onto);
+enum status_code bdiff_refresh(void);
 
 const struct bdiff_commit *bdiff_lookup(const char *id);
 bool bdiff_parents_differ(const struct bdiff_commit *new_commit, const struct bdiff_commit *old_commit);
@@ -74,6 +75,9 @@ bool bdiff_state_shows_range(enum bdiff_state state);
 void bdiff_sides(const struct bdiff_commit *commit, const char **new_id, const char **old_id);
 
 const char *bdiff_rev(void);
+const char *bdiff_rev_spec(void);
+const char *bdiff_base_spec(void);
+const char *bdiff_onto_spec(void);
 const char *bdiff_base(void);
 
 #endif
