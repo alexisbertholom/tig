@@ -708,6 +708,18 @@ diff_edit_blob(struct view *view, struct line *line)
 	return REQ_NONE;
 }
 
+/* Set when Tig was started with the "diff" subcommand, which opens the view on
+ * git-diff(1) output rather than on a commit.  Only the view started with is
+ * that diff: one opened from another view, the main view for example, shows
+ * the commit it was opened on, as always. */
+static bool diff_subcommand;
+
+void
+diff_set_subcommand(void)
+{
+	diff_subcommand = true;
+}
+
 static enum status_code
 diff_open(struct view *view, enum open_flags flags)
 {
@@ -719,6 +731,16 @@ diff_open(struct view *view, enum open_flags flags)
 			show_notes_arg(), diff_context_arg(), ignore_space_arg(),
 			DIFF_ARGS, "%(cmdlineargs)", "--no-color", word_diff_arg(),
 			"%(commit)", "--", "%(fileargs)", NULL
+	};
+	/* The "diff" subcommand names no commit to show: compare with
+	 * git-diff(1), which also covers the working tree and the index. */
+	const char *diff_subcommand_argv[] = {
+		"git", "diff", encoding_arg, "--patch-with-stat",
+			diff_stat_width_arg(), diff_stat_name_width_arg(),
+			diff_stat_graph_width_arg(), diff_context_arg(),
+			ignore_space_arg(), DIFF_ARGS, "%(cmdlineargs)",
+			"--no-color", word_diff_arg(), "%(revargs)", "--",
+			"%(fileargs)", NULL
 	};
 	struct diff_state *state = view->private;
 	enum status_code code;
@@ -735,6 +757,9 @@ diff_open(struct view *view, enum open_flags flags)
 
 	if (state->bdiff) {
 		code = diff_bdiff_start(view, state, flags);
+	} else if (diff_subcommand && !view->prev) {
+		code = begin_update(view, NULL, diff_subcommand_argv,
+				    flags | OPEN_WITH_STDERR);
 	} else {
 		code = begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
 	}

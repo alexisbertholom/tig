@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# Test the diff subcommand.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=16
+
+steps '
+	:save-display diff-rev.screen
+'
+
+setup_diff_repo()
+{
+	git_init .
+
+	git_add a "one"
+	git_commit -m "Initial"
+
+	git_add b "two"
+	git_commit -m "Second"
+
+	# The working tree takes part in the comparison, as it does for
+	# git-diff(1) and unlike what the shown commit of a diff view is.
+	file a "one and more"
+}
+
+in_work_dir setup_diff_repo
+
+test_tig diff HEAD~1
+
+assert_equals 'diff-rev.screen' <<EOF
+ a | 2 +-
+ b | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/a b/a
+index 43dd47e..bbe8cef 100644
+--- a/a
++++ b/a
+@@ -1 +1 @@
+-one
+\ No newline at end of file
++one and more
+\ No newline at end of file
+diff --git a/b b/b
+[diff] Press '<Enter>' to jump to file diff - line 1 of 21                   66%
+EOF

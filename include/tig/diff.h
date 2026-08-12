@@ -88,6 +88,8 @@ const char *diff_get_pathname(struct view *view, struct line *line, bool old);
 const char *diff_stat_pathname(struct view *view, struct line *line, bool old);
 bool diff_stat_row_under(struct view *view, struct line *header, struct line *line);
 
+void diff_set_subcommand(void);
+
 const char *diff_stat_width_arg(void);
 const char *diff_stat_name_width_arg(void);
 const char *diff_stat_graph_width_arg(void);

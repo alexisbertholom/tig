@@ -397,6 +397,7 @@ static const char usage_string[] =
 "Usage: tig        [options] [revs] [--] [paths]\n"
 "   or: tig log    [options] [revs] [--] [paths]\n"
 "   or: tig show   [options] [revs] [--] [paths]\n"
+"   or: tig diff   [options] [revs] [--] [paths]\n"
 "   or: tig reflog [options] [revs]\n"
 "   or: tig blame  [options] [rev] [--] path\n"
 "   or: tig grep   [options] [pattern]\n"
@@ -545,6 +546,10 @@ parse_options(int argc, const char *argv[], bool pager_mode)
 
 	} else if (!strcmp(subcommand, "show")) {
 		request = REQ_VIEW_DIFF;
+
+	} else if (!strcmp(subcommand, "diff")) {
+		request = REQ_VIEW_DIFF;
+		diff_set_subcommand();
 
 	} else if (!strcmp(subcommand, "log")) {
 		request = REQ_VIEW_LOG;

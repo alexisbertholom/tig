@@ -14,6 +14,7 @@ _______________________________________________________________________
 tig        [options] [revisions] [--] [paths]
 tig log    [options] [revisions] [--] [paths]
 tig show   [options] [revisions] [--] [paths]
+tig diff   [options] [revisions] [--] [paths]
 tig reflog [options] [revisions]
 tig blame  [options] [rev] [--] path
 tig grep   [options] [pattern]
@@ -47,6 +48,11 @@ rather than an argument.
 
 show::
 	Open diff view using the given git-show(1) options.
+
+diff::
+	Open diff view on the output of git-diff(1), using the given options.
+	Unlike 'show', which displays a commit, this compares two states, so
+	it also covers the working tree and, with '--cached', the index.
 
 blame::
 	Show given file annotated by commits.
@@ -254,6 +260,12 @@ $ tig --all
 Display differences between two branches:
 -----------------------------------------------------------------------------
 $ tig test..master
+-----------------------------------------------------------------------------
+
+Display what the current branch changed compared to another one, as a single
+diff rather than commit by commit:
+-----------------------------------------------------------------------------
+$ tig diff master
 -----------------------------------------------------------------------------
 
 Display changes for sub-module versions:

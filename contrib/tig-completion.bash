@@ -57,6 +57,7 @@ __tig_options="
 "
 __tig_commands="
 	blame
+	diff
 	grep
 	log
 	reflog
