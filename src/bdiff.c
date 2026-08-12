@@ -731,18 +731,8 @@ bdiff_plan_injections(void)
 static enum status_code
 bdiff_resolve_commit(const char *rev, char id[SIZEOF_REV])
 {
-	const char *rev_parse_argv[] = { "git", "rev-parse", "--verify", "--quiet", NULL, NULL };
-	char buf[SIZEOF_STR] = "";
-	char spec[SIZEOF_STR];
-
-	if (!string_format(spec, "%s^{commit}", rev))
-		return error("Revision name is too long: %s", rev);
-	rev_parse_argv[4] = spec;
-
-	if (!io_run_buf(rev_parse_argv, buf, sizeof(buf), NULL, false) || !*buf)
+	if (!repo_rev_exists(rev, id))
 		return error("Not a valid commit: %s", rev);
-
-	string_copy_rev(id, buf);
 
 	return SUCCESS;
 }
@@ -833,25 +823,13 @@ bdiff_load(const char *rev, const char *base, const char *onto)
 
 	/* Comparing a rewritten branch with the version it was pushed as is
 	 * the common case, so the upstream is what is compared against when
-	 * no revision is given.  A branch pushed without --set-upstream has
-	 * none, so fall back to the remote branch of the same name. */
+	 * no revision is given. */
 	if (!rev || !*rev) {
-		static char remote_branch[SIZEOF_REF];
+		rev = repo_upstream_rev();
 
-		if (repo.upstream[0]) {
-			rev = repo.upstream;
-
-		} else if (repo.head[0] &&
-			   string_format(remote_branch, "refs/remotes/%s/%s",
-					 repo.remote[0] ? repo.remote : "origin",
-					 repo.head) &&
-			   bdiff_resolve_commit(remote_branch, bdiff.rev) == SUCCESS) {
-			rev = remote_branch;
-
-		} else {
+		if (!rev)
 			return error("%s has no upstream branch; please name the revision to compare with",
 				     repo.head[0] ? repo.head : "HEAD");
-		}
 	}
 
 	code = bdiff_resolve(rev, base, onto);

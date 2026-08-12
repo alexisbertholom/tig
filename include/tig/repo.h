@@ -43,6 +43,9 @@ extern struct repo_info repo;
 enum status_code load_repo_info(void);
 enum status_code load_repo_head(void);
 
+bool repo_rev_exists(const char *rev, char id[SIZEOF_REV]);
+const char *repo_upstream_rev(void);
+
 struct index_diff {
 	int staged;
 	int unstaged;

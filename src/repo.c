@@ -132,6 +132,66 @@ load_repo_head(void)
 struct repo_info repo;
 
 /*
+ * Revisions.
+ */
+
+bool
+repo_rev_exists(const char *rev, char id[SIZEOF_REV])
+{
+	const char *rev_parse_argv[] = { "git", "rev-parse", "--verify", "--quiet", NULL, NULL };
+	char buf[SIZEOF_STR] = "";
+	char spec[SIZEOF_STR];
+
+	if (!string_format(spec, "%s^{commit}", rev))
+		return false;
+	rev_parse_argv[4] = spec;
+
+	if (!io_run_buf(rev_parse_argv, buf, sizeof(buf), NULL, false) || !*buf)
+		return false;
+
+	if (id)
+		string_copy_rev(id, buf);
+
+	return true;
+}
+
+/* Asks Git rather than read repo.upstream: the command line is parsed before
+ * the repository is loaded, and that is where the name is first expanded. */
+const char *
+repo_upstream_rev(void)
+{
+	static char upstream[SIZEOF_REF];
+	const char *upstream_argv[] = {
+		"git", "rev-parse", "--verify", "--quiet", "--abbrev-ref", "@{upstream}", NULL
+	};
+	const char *branch_argv[] = { "git", "symbolic-ref", "--quiet", "--short", "HEAD", NULL };
+	const char *remote_argv[] = { "git", "config", "--get", NULL, NULL };
+	char branch[SIZEOF_REF] = "";
+	char remote[SIZEOF_REF] = "";
+	char key[SIZEOF_STR];
+
+	if (io_run_buf(upstream_argv, upstream, sizeof(upstream), NULL, false))
+		return upstream;
+
+	/* A branch pushed without --set-upstream tracks nothing, although the
+	 * remote branch it was pushed to is right there. */
+	if (!io_run_buf(branch_argv, branch, sizeof(branch), NULL, false))
+		return NULL;
+
+	if (string_format(key, "branch.%s.remote", branch)) {
+		remote_argv[3] = key;
+		io_run_buf(remote_argv, remote, sizeof(remote), NULL, false);
+	}
+
+	if (!string_format(upstream, "refs/remotes/%s/%s",
+			   *remote ? remote : "origin", branch) ||
+	    !repo_rev_exists(upstream, NULL))
+		return NULL;
+
+	return upstream;
+}
+
+/*
  * Git index utils.
  */
 
