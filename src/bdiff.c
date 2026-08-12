@@ -833,12 +833,25 @@ bdiff_load(const char *rev, const char *base, const char *onto)
 
 	/* Comparing a rewritten branch with the version it was pushed as is
 	 * the common case, so the upstream is what is compared against when
-	 * no revision is given. */
+	 * no revision is given.  A branch pushed without --set-upstream has
+	 * none, so fall back to the remote branch of the same name. */
 	if (!rev || !*rev) {
-		if (!repo.upstream[0])
+		static char remote_branch[SIZEOF_REF];
+
+		if (repo.upstream[0]) {
+			rev = repo.upstream;
+
+		} else if (repo.head[0] &&
+			   string_format(remote_branch, "refs/remotes/%s/%s",
+					 repo.remote[0] ? repo.remote : "origin",
+					 repo.head) &&
+			   bdiff_resolve_commit(remote_branch, bdiff.rev) == SUCCESS) {
+			rev = remote_branch;
+
+		} else {
 			return error("%s has no upstream branch; please name the revision to compare with",
 				     repo.head[0] ? repo.head : "HEAD");
-		rev = repo.upstream;
+		}
 	}
 
 	code = bdiff_resolve(rev, base, onto);

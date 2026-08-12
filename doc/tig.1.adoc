@@ -75,7 +75,8 @@ grep::
 --bdiff [<rev>]::
 	Compare the history of HEAD with the one of <rev>, commit by commit,
 	starting from their common ancestor. Without <rev>, the upstream of
-	the current branch is used. See the "BASE DIFF" section.
+	the current branch is used, or the remote branch of the same name
+	when the branch tracks nothing. See the "BASE DIFF" section.
 
 --bdiff-base <rev>::
 	Compare from <rev> instead of the common ancestor of HEAD and the
@@ -145,8 +146,9 @@ BASE DIFF
 
 When started with '--bdiff <rev>', Tig compares the history of HEAD with the
 one of <rev>, commit by commit, starting from their common ancestor, the way
-git-range-diff(1) does. Without <rev>, HEAD is compared with its upstream,
-which tells what a rewrite did to the branch since it was last pushed. '--bdiff-base' compares from another commit instead,
+git-range-diff(1) does. Without <rev>, HEAD is compared with its upstream, or
+with the remote branch of the same name when the branch tracks nothing, which
+tells what a rewrite did to the branch since it was last pushed. '--bdiff-base' compares from another commit instead,
 for when the best common ancestor is not the one the history was written
 against.
 
