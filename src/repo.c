@@ -191,6 +191,73 @@ repo_upstream_rev(void)
 	return upstream;
 }
 
+/* The name stands for a revision, so it is recognised where one starts: on its
+ * own, at either end of a range and before the suffixes Git spells revisions
+ * with, as in _up, _up..HEAD or _up~2.  Anywhere else it is part of a name. */
+static bool
+rev_upstream_at(const char *rev, const char *pos)
+{
+	const char *end = pos + STRING_SIZE(REV_UPSTREAM);
+
+	if (strncmp(pos, REV_UPSTREAM, STRING_SIZE(REV_UPSTREAM)))
+		return false;
+
+	if (pos != rev && (pos - rev < 2 || strncmp(pos - 2, "..", 2)))
+		return false;
+
+	return !*end || strchr("~^:.@", *end);
+}
+
+static bool
+rev_has_upstream(const char *rev)
+{
+	const char *pos;
+
+	for (pos = rev; *pos; pos++)
+		if (rev_upstream_at(rev, pos))
+			return true;
+
+	return false;
+}
+
+/* Git spells the upstream '@{upstream}', which is a chore to type on keyboards
+ * where those characters take a modifier.  REV_UPSTREAM says the same thing in
+ * letters, but only where Git has nothing to say: a revision Git resolves
+ * keeps its meaning, so a ref really named that still wins.  The name is
+ * looked for before Git is asked anything, so paths and revisions which merely
+ * contain it cost nothing. */
+const char *
+repo_expand_rev(const char *rev)
+{
+	static char expanded[SIZEOF_STR];
+	const char *upstream;
+	const char *pos;
+	size_t len = 0;
+
+	if (!rev || !rev_has_upstream(rev) || repo_rev_exists(rev, NULL))
+		return rev;
+
+	upstream = repo_upstream_rev();
+
+	/* Without an upstream, leave the name alone and let the caller fail on
+	 * it, the way it would for any other unknown revision. */
+	if (!upstream)
+		return rev;
+
+	for (pos = rev; *pos; pos++) {
+		if (rev_upstream_at(rev, pos)) {
+			if (!string_nformat(expanded, sizeof(expanded), &len, "%s", upstream))
+				return rev;
+			pos += STRING_SIZE(REV_UPSTREAM) - 1;
+
+		} else if (!string_nformat(expanded, sizeof(expanded), &len, "%c", *pos)) {
+			return rev;
+		}
+	}
+
+	return expanded;
+}
+
 /*
  * Git index utils.
  */

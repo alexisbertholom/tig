@@ -46,6 +46,14 @@ together. For example, run tig -Sfoo instead of tig -S foo, and tig --grep=foo
 instead of tig --grep foo, otherwise foo will be interpreted as a revision
 rather than an argument.
 
+Wherever a revision is expected, '_up' stands for the branch the current one is
+pushed to: its upstream, or the remote branch of the same name when it tracks
+nothing. Git spells it '@{upstream}', which takes a modifier to type on some
+keyboards. It is recognized where a revision starts, so '_up', '_up..HEAD' and
+'_up~2' all work, and only where Git has nothing to say: a revision Git
+resolves keeps its meaning, so a ref really named '_up' still wins. Use the
+usual '--' separator for a path of that name.
+
 show::
 	Open diff view using the given git-show(1) options.
 

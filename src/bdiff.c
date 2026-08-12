@@ -731,7 +731,7 @@ bdiff_plan_injections(void)
 static enum status_code
 bdiff_resolve_commit(const char *rev, char id[SIZEOF_REV])
 {
-	if (!repo_rev_exists(rev, id))
+	if (!repo_rev_exists(repo_expand_rev(rev), id))
 		return error("Not a valid commit: %s", rev);
 
 	return SUCCESS;

@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# Test _up, the name standing for the upstream wherever a revision is expected.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=14
+
+setup_upstream_repo()
+{
+	git_init .
+
+	git_add a "one"
+	git_commit -m "Initial"
+
+	git_add a "one and two"
+	git_commit -m "Second"
+
+	git_add a "one and two and three"
+	git_commit -m "Third"
+
+	# Set up an upstream without a remote to push to: the tracking ref and
+	# the configuration a push would have left behind are all it takes.
+	git update-ref refs/remotes/origin/master master~2
+	git config remote.origin.url ../remote.git
+	git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+	git config branch.master.remote origin
+	git config branch.master.merge refs/heads/master
+}
+
+in_work_dir setup_upstream_repo
+
+test_case upstream \
+ --args='diff _up' <<EOF
+ a | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/a b/a
+index 43dd47e..773afed 100644
+--- a/a
++++ b/a
+@@ -1 +1 @@
+-one
+\ No newline at end of file
++one and two and three
+\ No newline at end of file
+[diff] Press '<Enter>' to jump to file diff - line 1 of 12                  100%
+EOF
+
+# Git is asked first, so a ref really named _up keeps the name for itself:
+# the comparison then starts from "one and two" rather than from "one".
+test_case shadowed \
+ --before='git branch _up master~1' \
+ --args='diff _up' <<EOF
+ a | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/a b/a
+index 97589d1..773afed 100644
+--- a/a
++++ b/a
+@@ -1 +1 @@
+-one and two
+\ No newline at end of file
++one and two and three
+\ No newline at end of file
+[diff] Press '<Enter>' to jump to file diff - line 1 of 12                  100%
+EOF
+
+run_test_cases

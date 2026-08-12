@@ -43,8 +43,12 @@ extern struct repo_info repo;
 enum status_code load_repo_info(void);
 enum status_code load_repo_head(void);
 
+/* Name standing for the upstream wherever a revision is expected. */
+#define REV_UPSTREAM "_up"
+
 bool repo_rev_exists(const char *rev, char id[SIZEOF_REV]);
 const char *repo_upstream_rev(void);
+const char *repo_expand_rev(const char *rev);
 
 struct index_diff {
 	int staged;
