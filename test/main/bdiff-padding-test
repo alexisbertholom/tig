@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# Test a comparison long enough for git-range-diff(1) to align the positions
+# it reports, which pads the shorter ones.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=16
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+setup_long_branch_repo()
+{
+	rewrite_date="Sat Apr 4 13:29:36 2015 +0200"
+
+	git_init .
+
+	git_add base "base"
+	git_commit -m "Initial"
+
+	i=1
+	while [ "$i" -le 11 ]; do
+		git_add "f$i" "$i"
+		git_commit -m "Commit $i"
+		i=$(expr "$i" + 1)
+	done
+
+	git branch old
+
+	# Only the first commit of the branch is edited, but every commit
+	# after it is written again on top of it.  Cherry-picking keeps the
+	# author dates, the way a rebase would.
+	git reset -q --hard old~10
+	git_add f1 "one changed"
+	GIT_COMMITTER_DATE="$rewrite_date" git commit -q --amend --no-edit
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick old~10..old > /dev/null
+}
+
+in_work_dir setup_long_branch_repo
+
+# Eleven commits on each side, so the positions are two columns wide and the
+# first nine are padded: the pairs are still read, and only the commit which
+# was edited differs.
+test_case padded-positions \
+ --args='--bdiff old' <<EOF
+* [master] [same] Commit 11
+* [same] Commit 10
+* [same] Commit 9
+* [same] Commit 8
+* [same] Commit 7
+* [same] Commit 6
+* [same] Commit 5
+* [same] Commit 4
+* [same] Commit 3
+* [same] Commit 2
+* [change] Commit 1
+I Initial
+ 
+ 
+[main] 34db7841e2b392aeb779aff8d1582cc389db7d8e - commit 1 of 12            100%
+EOF
+
+run_test_cases

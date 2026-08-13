@@ -569,9 +569,11 @@ bdiff_pair_commits(bool with_merges)
 	while (io_get(&io, &buf, '\n', true)) {
 		char *line = buf.data;
 
-		/* The pairs are listed in the first column, the diff between
-		 * the two patches of a pair is indented under it. */
-		if (*line && !isspace((unsigned char) *line))
+		/* The diff between the two patches of a pair is indented under
+		 * the line listing it.  That line is not always in the first
+		 * column: the positions it gives are aligned on the widest of
+		 * them, so the shorter ones are padded. */
+		if (strncmp(line, "    ", BDIFF_RANGE_INDENT))
 			pair = bdiff_parse_pairing(line);
 		else if (pair && bdiff_pairing_line_changes_patch(line))
 			pair->patch_body_differs = true;
