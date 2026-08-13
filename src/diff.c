@@ -1219,6 +1219,7 @@ struct diff_refine {
 	struct refine_token *removed, *added;
 	size_t nremoved, removed_alloc;
 	size_t nadded, added_alloc;
+	size_t removed_words, added_words;	/* Lines holding at least one. */
 	/* Only highlight when both sides of the block are present, instead of
 	 * treating a one-sided block as entirely new. */
 	bool pair_only;
@@ -1329,7 +1330,42 @@ refine_push_styled_line(struct diff_refine *r, const char *text,
 	ln->text = copy;
 	ln->style = *style;
 	ln->tok_first = ln->tok_count = 0;
-	return refine_tokenize(r, (int) (r->lines - 1));
+
+	/* A line with something past its markers yields a word, and one with
+	 * nothing past them yields none: this is the count the flush needs. */
+	if (strlen(copy) > style->prefix) {
+		if (style->added)
+			r->added_words++;
+		else
+			r->removed_words++;
+	}
+
+	return true;
+}
+
+/*
+ * Cut the whole block into words, giving up as soon as there are more pairs of
+ * them than the dynamic program below is allowed.  Neither count ever falls,
+ * so a block over the budget stays over it: stopping here reaches the same
+ * answer the full count would, without the work or the memory it would take.
+ *
+ * Running out of memory returns false the same way, and the caller draws the
+ * block without refining it rather than failing the whole load.  Refinement is
+ * decoration: a diff shown plainly beats a diff not shown.
+ */
+static bool
+refine_tokenize_block(struct diff_refine *r)
+{
+	size_t i;
+
+	for (i = 0; i < r->lines; i++) {
+		if (!refine_tokenize(r, (int) i))
+			return false;
+		if ((unsigned long long) r->nremoved * r->nadded > REFINE_MAX_PRODUCT)
+			return false;
+	}
+
+	return true;
 }
 
 /* Buffer a line which is only highlighted when the matching line of the other
@@ -1453,30 +1489,74 @@ refine_emit_styled_line(struct view *view, const char *text,
 	return refine_emit_plain(view, &ln);
 }
 
+/* The markers and the indent a line opens with are never highlighted. */
+static bool
+refine_emit_prefix(struct diff_stat_context *ctx, struct refine_line *ln)
+{
+	bool ok = true;
+
+	if (ln->style.mark_len) {
+		ctx->type = LINE_DEFAULT;
+		ok = diff_common_add_cell(ctx, ln->style.indent, false);
+		ctx->type = ln->style.mark_type;
+		if (ok)
+			ok = diff_common_add_cell(ctx, ln->style.mark_len, false);
+		ctx->type = ln->style.type;
+		if (ok)
+			ok = diff_common_add_cell(ctx, ln->style.prefix -
+						  ln->style.indent -
+						  ln->style.mark_len, false);
+	} else if (ln->style.prefix) {
+		ok = diff_common_add_cell(ctx, ln->style.prefix, false);
+	}
+
+	return ok;
+}
+
+/*
+ * Draw a line of a block with nothing on the other side.  Every word of it is
+ * new, so none is ever shared, and the run-merging of refine_emit_line() would
+ * join them all into the single cell written here -- which is why such a block
+ * is never cut into words in the first place.
+ *
+ * That makes this function a shortcut through refine_emit_line(), and the two
+ * have to keep agreeing: whatever the loop there writes for a line no word of
+ * which is shared, this must write as well.  Change how a run of unshared
+ * words is drawn -- its colour, the cells it is split into, what the prefix
+ * gets -- and both have to change together, or a file added will stop looking
+ * like a file rewritten.
+ */
+static bool
+refine_emit_whole(struct view *view, struct refine_line *ln)
+{
+	struct diff_stat_context ctx = { ln->text, ln->style.type };
+	bool ok = refine_emit_prefix(&ctx, ln);
+
+	ctx.type = ln->style.hi_type;
+	if (ok)
+		ok = diff_common_add_cell(&ctx, strlen(ln->text) - ln->style.prefix,
+					  false);
+
+	/* Fall back to a plain line if the cell budget was exhausted. */
+	if (!ok)
+		return refine_emit_plain(view, ln);
+
+	return diff_common_add_line(view, ln->text, ln->style.type, &ctx) != NULL;
+}
+
 static bool
 refine_emit_line(struct view *view, struct diff_refine *r,
 		 struct refine_line *ln)
 {
 	struct diff_stat_context ctx = { ln->text, ln->style.type };
 	struct refine_token *toks = ln->style.added ? r->added : r->removed;
-	bool ok = true;
+	bool ok = refine_emit_prefix(&ctx, ln);
 	int t;
 
-	if (ln->style.mark_len) {
-		ctx.type = LINE_DEFAULT;
-		ok = diff_common_add_cell(&ctx, ln->style.indent, false);
-		ctx.type = ln->style.mark_type;
-		if (ok)
-			ok = diff_common_add_cell(&ctx, ln->style.mark_len, false);
-		ctx.type = ln->style.type;
-		if (ok)
-			ok = diff_common_add_cell(&ctx, ln->style.prefix -
-						  ln->style.indent -
-						  ln->style.mark_len, false);
-	} else if (ln->style.prefix) {
-		ok = diff_common_add_cell(&ctx, ln->style.prefix, false);
-	}
-
+	/* Neighbouring words drawn the same way become one cell.  A line no
+	 * word of which is shared therefore comes out as a single run covering
+	 * everything past the prefix, which is what refine_emit_whole() writes
+	 * without the words: keep the two in step. */
 	for (t = 0; ok && t < ln->tok_count; ) {
 		struct refine_token *tok = &toks[ln->tok_first + t];
 		bool shared = tok->shared;
@@ -1508,6 +1588,7 @@ diff_refine_reset(struct diff_refine *r)
 	for (i = 0; i < r->lines; i++)
 		free(r->line[i].text);
 	r->lines = r->nremoved = r->nadded = 0;
+	r->removed_words = r->added_words = 0;
 }
 
 static void
@@ -1529,29 +1610,41 @@ static bool
 diff_refine_flush(struct view *view, struct diff_state *state)
 {
 	struct diff_refine *r = state->refine;
-	bool refine, ok = true;
+	bool refine, both, ok = true;
 	size_t k;
 
 	if (!r || r->lines == 0)
 		return true;
 
-	/* Highlight as long as there is content.  When one side is empty (a pure
-	 * insertion or deletion) every token is new, so the whole run is
-	 * highlighted, as diffr does.  The common subsequence is only needed when
-	 * both sides exist, and is skipped above the product guard to bound the
-	 * cost of the O(n*m) dynamic program on pathological blocks. */
-	refine = r->pair_only ? (r->nremoved > 0 && r->nadded > 0)
-			     : (r->nremoved > 0 || r->nadded > 0);
-	if (r->nremoved > 0 && r->nadded > 0) {
-		if ((unsigned long long) r->nremoved * r->nadded > REFINE_MAX_PRODUCT)
+	/* Highlight as long as there is content.  A line holds a word exactly
+	 * when it holds anything past its markers, so counting those lines says
+	 * which sides have words without cutting a single one of them up.
+	 *
+	 * When one side has none (a pure insertion or deletion) every word of
+	 * the other is new, so the whole run is highlighted, as diffr does, and
+	 * the words themselves are never needed: the line is drawn in one
+	 * piece.  Only a block with words on both sides is cut up, to find what
+	 * they share -- and only up to the guard which bounds the cost of the
+	 * O(n*m) dynamic program on pathological blocks. */
+	both = r->removed_words > 0 && r->added_words > 0;
+	refine = r->pair_only ? both
+			      : (r->removed_words > 0 || r->added_words > 0);
+
+	/* Cutting one whole side into words before the other side can push the
+	 * count past the guard is work the guard was there to save, so rule the
+	 * block out on the words it is known to hold before cutting any. */
+	if (refine && both) {
+		if ((unsigned long long) r->removed_words * r->added_words >
+		    REFINE_MAX_PRODUCT)
 			refine = false;
-		else if (!refine_lcs(r))
+		else if (!refine_tokenize_block(r) || !refine_lcs(r))
 			refine = false;
 	}
 
 	for (k = 0; ok && k < r->lines; k++)
-		ok = refine ? refine_emit_line(view, r, &r->line[k])
-			    : refine_emit_plain(view, &r->line[k]);
+		ok = !refine ? refine_emit_plain(view, &r->line[k])
+			     : both ? refine_emit_line(view, r, &r->line[k])
+				    : refine_emit_whole(view, &r->line[k]);
 
 	diff_refine_reset(r);
 	return ok;
