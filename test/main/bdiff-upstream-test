@@ -1,0 +1,69 @@
+#!/bin/sh
+#
+# Test what a base diff compares with when no revision is given.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=10
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+setup_pushed_repo()
+{
+	git_init .
+
+	git_add a "a"
+	git_commit -m "Initial"
+
+	git_add b "b"
+	git_commit -m "Work in progress"
+
+	# What pushing the branch would have left behind: the tracking ref and
+	# the configuration naming it.
+	git update-ref refs/remotes/origin/master master
+	git config remote.origin.url ../remote.git
+	git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+	git config branch.master.remote origin
+	git config branch.master.merge refs/heads/master
+
+	git_add b "b and more"
+	GIT_COMMITTER_DATE="Sat Apr 4 13:29:36 2015 +0200" git commit -q --amend -m "Work in progress"
+}
+
+in_work_dir setup_pushed_repo
+
+# The branch is compared with what it was pushed as.
+test_case upstream \
+ --args='--bdiff' <<EOF
+* [master] [change] Work in progress
+I Initial
+ 
+ 
+ 
+ 
+ 
+ 
+[main] 0a061542bd8022a22c74780f18d2c52e435fc09b - commit 1 of 2             100%
+EOF
+
+# A branch pushed without --set-upstream tracks nothing, but the remote
+# branch it was pushed to is still there to compare with.
+test_case no-upstream-configured \
+ --before='git config --unset branch.master.remote; git config --unset branch.master.merge' \
+ --args='--bdiff' <<EOF
+* [master] [change] Work in progress
+I Initial
+ 
+ 
+ 
+ 
+ 
+ 
+[main] 0a061542bd8022a22c74780f18d2c52e435fc09b - commit 1 of 2             100%
+EOF
+
+run_test_cases

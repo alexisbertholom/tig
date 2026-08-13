@@ -1,0 +1,94 @@
+#!/bin/sh
+#
+# Test which commit each side of a base diff is compared from.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=12
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+setup_rebased_repo()
+{
+	git_init .
+
+	git_add a "a"
+	git_commit -m "Master A"
+
+	git checkout -q -b feature
+	git_add f1 "f1"
+	git_commit -m "Feature 1"
+	git_add f2 "f2"
+	git_commit -m "Feature 2"
+	git branch old-feature
+
+	git checkout -q master
+	git_add up1 "up1"
+	git_commit -m "Upstream C"
+	git_add up2 "up2"
+	git_commit -m "Upstream D"
+
+	# The branch is rebased onto what master has become, which leaves the
+	# two sides starting at a different commit.
+	git checkout -q feature
+	GIT_COMMITTER_DATE="Sat Apr 4 13:29:36 2015 +0200" git rebase -q master
+}
+
+in_work_dir setup_rebased_repo
+
+# The best common ancestor is where the branch was first written, so the
+# commits the rebase pulled in are part of the comparison.
+test_case shared-base \
+ --args='--bdiff old-feature' <<EOF
+* [feature] [same] Feature 2
+* [same] Feature 1
+* [master] [add] Upstream D
+* [add] Upstream C
+I Master A
+ 
+ 
+ 
+ 
+ 
+[main] 8fe849fb8e5acc6acdcdb58ad9b4128e9d192568 - commit 1 of 5             100%
+EOF
+
+# Measuring each side from where it left master leaves only the commits of
+# the branch itself.
+test_case onto \
+ --args='--bdiff old-feature --bdiff-onto master' <<EOF
+* [feature] [same] Feature 2
+* [same] Feature 1
+* [master] Upstream D
+* Upstream C
+I Master A
+ 
+ 
+ 
+ 
+ 
+[main] 8fe849fb8e5acc6acdcdb58ad9b4128e9d192568 - commit 1 of 5             100%
+EOF
+
+# Naming the commit to compare from does the same here, without having to
+# work out where each side forked.
+test_case explicit-base \
+ --args='--bdiff old-feature --bdiff-base master' <<EOF
+* [feature] [same] Feature 2
+* [same] Feature 1
+* [master] Upstream D
+* Upstream C
+I Master A
+ 
+ 
+ 
+ 
+ 
+[main] 8fe849fb8e5acc6acdcdb58ad9b4128e9d192568 - commit 1 of 5             100%
+EOF
+
+run_test_cases

@@ -1,0 +1,112 @@
+#!/bin/sh
+#
+# Test the commits paired by their message, once git-range-diff(1) has given
+# up on recognising their patch.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=10
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+setup_rewritten_repo()
+{
+	rewrite_date="Sat Apr 4 13:29:36 2015 +0200"
+
+	git_init .
+
+	git_add a "a"
+	git_commit -m "Initial"
+
+	printf 'one\ntwo\nthree\nfour\nfive\n' > f
+	git add f
+	git_commit --cleanup=verbatim -F - <<-MSG
+	Reflowed message
+
+	A body ending on a blank line.
+
+	MSG
+
+	printf 'one\ntwo\nthree\nfour\nfive\n' > g
+	git add g
+	git_commit -F - <<-MSG
+	Rewritten body
+
+	The body as it was first written.
+	MSG
+
+	# A subject cleaned of its trailing whitespace: the subjects no longer
+	# match, only the messages once their whitespace is left out.
+	printf 'one\ntwo\nthree\nfour\nfive\n' > h
+	git add h
+	git_commit --cleanup=verbatim -F - <<-MSG
+	Trailing space in the subject 
+
+	A body.
+	MSG
+
+	git branch old
+
+	# Both commits are written again with a patch sharing nothing with the
+	# one they had, which is what makes range-diff give up on them.  Their
+	# author date is kept, the way a rebase would.
+	first_date="$(git log -1 --format=%aD old~2)"
+	second_date="$(git log -1 --format=%aD old~1)"
+	third_date="$(git log -1 --format=%aD old)"
+
+	git reset -q --hard old~3
+
+	rm -f f
+	printf 'alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\n' > f2
+	git add -A
+	GIT_AUTHOR_DATE="$first_date" GIT_COMMITTER_DATE="$rewrite_date" \
+		git commit -q -F - <<-MSG
+	Reflowed message
+
+	A body ending on a blank line.
+	MSG
+
+	rm -f g
+	printf 'alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\n' > g2
+	git add -A
+	GIT_AUTHOR_DATE="$second_date" GIT_COMMITTER_DATE="$rewrite_date" \
+		git commit -q -F - <<-MSG
+	Rewritten body
+
+	A body describing what the commit became once its patch was reworked.
+	MSG
+
+	rm -f h
+	printf 'alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\n' > h2
+	git add -A
+	GIT_AUTHOR_DATE="$third_date" GIT_COMMITTER_DATE="$rewrite_date" \
+		git commit -q -F - <<-MSG
+	Trailing space in the subject
+
+	A body.
+	MSG
+}
+
+in_work_dir setup_rewritten_repo
+
+# One commit only lost the blank line at the end of its message, one had its
+# body rewritten around the same subject, and one had its subject cleaned of a
+# trailing space: none of them is a commit added and one removed.
+test_case rewritten \
+ --args='--bdiff old' <<EOF
+* [master] [change] Trailing space in the subject
+* [change] Rewritten body
+* [change] Reflowed message
+I Initial
+ 
+ 
+ 
+ 
+[main] e000ebb99e30f0c61663891e5a38cf41c49c7100 - commit 1 of 4             100%
+EOF
+
+run_test_cases

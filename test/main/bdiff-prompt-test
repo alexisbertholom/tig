@@ -1,0 +1,83 @@
+#!/bin/sh
+#
+# Test starting a base diff from the prompt, and keeping it up with a history
+# rewritten while Tig is open.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=10
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+setup_rewritten_repo()
+{
+	git_init .
+
+	git_add a "a"
+	git_commit -m "Initial"
+
+	git_add b "b"
+	git_commit -m "Kept commit"
+
+	git_add c "c"
+	git_commit -m "Amended commit"
+
+	git branch old
+
+	git_add c "c and more"
+	GIT_COMMITTER_DATE="Sat Apr 4 13:29:36 2015 +0200" git commit -q --amend --no-edit
+}
+
+in_work_dir setup_rewritten_repo
+
+# Nothing is compared until asked for.
+test_case before <<EOF
+* [master] Amended commit
+* Kept commit
+I Initial
+ 
+ 
+ 
+ 
+ 
+[main] e44b162a82dc60815684dd1c1fb51b239103e23d - commit 1 of 3             100%
+EOF
+
+# The comparison starts without having to leave the view.
+test_case from-the-prompt \
+ --script=':bdiff old' <<EOF
+* [master] [change] Amended commit
+* Kept commit
+I Initial
+ 
+ 
+ 
+ 
+ 
+[main] e44b162a82dc60815684dd1c1fb51b239103e23d - commit 1 of 3             100%
+EOF
+
+# A commit written while the view is open is classified with the rest, rather
+# than described against the HEAD of a moment ago.
+test_case rewritten-underneath \
+ --args='--bdiff old' \
+ --script='
+	:exec !env GIT_AUTHOR_DATE=2015-04-04T13:29:36+02:00 GIT_COMMITTER_DATE=2015-04-04T13:29:36+02:00 git commit --allow-empty -q -m Afterwards
+	:refresh
+' <<EOF
+* [master] [add] Afterwards
+* [change] Amended commit
+* Kept commit
+I Initial
+ 
+ 
+ 
+ 
+[main] 2d48c11f475281ff2ec8132dc6f16ba7a48510df - commit 1 of 4             100%
+EOF
+
+run_test_cases
