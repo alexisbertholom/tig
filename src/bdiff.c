@@ -553,36 +553,59 @@ bdiff_pair_commits(bool with_merges)
 
 /*
  * range-diff gives up on commits whose patch changed too much to be
- * recognised.  Pair the leftovers when the commit message and the author date
- * are identical, which a rewrite preserves but two unrelated commits will not
- * share.
+ * recognised.  Pair the leftovers on what a rewrite keeps: the author date
+ * and the commit message, first as a whole and then down to its subject,
+ * which two unrelated commits will not share.
  */
+static bool
+bdiff_rescue_matches(struct bdiff_commit *new_commit, struct bdiff_commit *old_commit,
+		     bool subject_only)
+{
+	/* The author date is kept by a rewrite, but says little on its own:
+	 * commits written in one go share it. */
+	if (old_commit->author_time.sec != new_commit->author_time.sec)
+		return false;
+
+	/* Rewriting a commit often reworks the body of its message, to
+	 * describe what the commit became; the subject is what stays. */
+	if (subject_only)
+		return *new_commit->subject &&
+		       !strcmp(old_commit->subject, new_commit->subject);
+
+	return old_commit->message_hash == new_commit->message_hash;
+}
+
 static void
 bdiff_rescue_pairs(void)
 {
 	size_t i, j;
+	int pass;
 
-	for (i = 0; i < bdiff.new_side.commits; i++) {
-		struct bdiff_commit *new_commit = bdiff.new_side.commit[i];
+	/* The whole message tells two commits apart better than its subject
+	 * alone, so pair on it first: a looser match must not take a commit
+	 * an exact one was waiting for. */
+	for (pass = 0; pass < 2; pass++) {
+		for (i = 0; i < bdiff.new_side.commits; i++) {
+			struct bdiff_commit *new_commit = bdiff.new_side.commit[i];
 
-		if (new_commit->peer)
-			continue;
-
-		for (j = 0; j < bdiff.old_side.commits; j++) {
-			struct bdiff_commit *old_commit = bdiff.old_side.commit[j];
-
-			if (old_commit->peer ||
-			    old_commit->message_hash != new_commit->message_hash ||
-			    old_commit->author_time.sec != new_commit->author_time.sec)
+			if (new_commit->peer)
 				continue;
 
-			old_commit->peer = new_commit->id;
-			old_commit->peer_pos = new_commit->pos;
-			old_commit->patch_differs = true;
-			new_commit->peer = old_commit->id;
-			new_commit->peer_pos = old_commit->pos;
-			new_commit->patch_differs = true;
-			break;
+			for (j = 0; j < bdiff.old_side.commits; j++) {
+				struct bdiff_commit *old_commit = bdiff.old_side.commit[j];
+
+				if (old_commit->peer ||
+				    !bdiff_rescue_matches(new_commit, old_commit, pass > 0))
+					continue;
+
+				old_commit->peer = new_commit->id;
+				old_commit->peer_pos = new_commit->pos;
+				old_commit->patch_differs = true;
+				new_commit->peer = old_commit->id;
+				new_commit->peer_pos = old_commit->pos;
+				new_commit->patch_differs = true;
+				break;
+			}
 		}
 	}
 }
