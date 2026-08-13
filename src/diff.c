@@ -206,7 +206,11 @@ diff_bdiff_metadata_lines(struct view *view,
 			return false;
 	}
 
-	if (new_commit->state == BDIFF_MOVE || new_commit->state == BDIFF_MOVE_CHANGE) {
+	/* Where the commit reads is only worth reporting when it reads
+	 * somewhere else; a commit can be the one reported as moved and still
+	 * be at the position it had. */
+	if (bdiff_state_moved(new_commit->state) &&
+	    new_commit->pos != old_commit->pos) {
 		changed = true;
 		if (add_lines &&
 		    (!add_line_format(view, LINE_DIFF_DEL, "-Position:   %d", old_commit->pos) ||

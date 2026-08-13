@@ -149,6 +149,13 @@ bdiff_state_shows_old(enum bdiff_state state)
 }
 
 bool
+bdiff_state_moved(enum bdiff_state state)
+{
+	return state == BDIFF_MOVE || state == BDIFF_MOVE_CHANGE ||
+	       state == BDIFF_MOVE_CTX;
+}
+
+bool
 bdiff_state_shows_range(enum bdiff_state state)
 {
 	return state == BDIFF_CHANGE || state == BDIFF_MOVE_CHANGE ||

@@ -77,6 +77,7 @@ enum line_type bdiff_state_line_type(enum bdiff_state state);
 bool bdiff_state_shows_new(enum bdiff_state state);
 bool bdiff_state_shows_old(enum bdiff_state state);
 bool bdiff_state_shows_range(enum bdiff_state state);
+bool bdiff_state_moved(enum bdiff_state state);
 
 /* The commit IDs of the two sides of a classified commit; either may be
  * NULL when the commit only exists on one side. */

@@ -9,6 +9,8 @@ export LINES=12
 
 tigrc <<EOF
 set line-graphics = ascii
+set vertical-split = no
+set diff-view = line-number:no text
 set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
 EOF
 
@@ -85,6 +87,24 @@ test_case context-only \
 I-' Initial
  
 [main] af1bb75d4d509cd54eb254ae987528ae1fe9c453 - commit 1 of 7             100%
+EOF
+
+# What a commit reports besides its patch: where it reads now, and the parent
+# it was written against.  The position is only reported because it changed.
+test_case metadata \
+ --args='--bdiff old' \
+ --script='<Enter>' <<EOF
+* [master] [move-ctx] Insert a line
+* [move-change] Edit the other file
+* [add] Change the context
+[main] af1bb75d4d509cd54eb254ae987528ae1fe9c453 - commit 1 of 7              33%
+[move-ctx] metadata
+-Parents:    a2dcb3509cf92b59fb19fab1ce598d4841cd2d48
++Parents:    eac1f891791b771d46bf3b858816210a6f06487d
+-Position:   1
++Position:   6
+ 
+[diff] af1bb75d4d509cd54eb254ae987528ae1fe9c453 - line 1 of 67                8%
 EOF
 
 run_test_cases
