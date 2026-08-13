@@ -61,6 +61,9 @@ diff::
 	Open diff view on the output of git-diff(1), using the given options.
 	Unlike 'show', which displays a commit, this compares two states, so
 	it also covers the working tree and, with '--cached', the index.
+	Given no revision, a working tree with nothing to show is compared
+	with the upstream instead. The view title names what is compared,
+	which also tells whether that fallback took place.
 
 blame::
 	Show given file annotated by commits.

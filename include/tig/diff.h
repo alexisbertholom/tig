@@ -50,6 +50,7 @@ struct diff_state {
 	bool highlight;
 	bool native_refine;
 	bool stage;
+	bool retry_upstream;		/* Compare with the upstream if empty. */
 	unsigned int parents;
 	const char *file;
 	unsigned int lineno;

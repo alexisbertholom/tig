@@ -719,6 +719,10 @@ static bool diff_subcommand;
 static char diff_subcommand_rev[SIZEOF_REF];
 static const char *diff_subcommand_msg;
 
+/* The bare form, comparing the working tree with the index: the only
+ * comparison Tig picked rather than was given. */
+static bool diff_subcommand_unstaged;
+
 void
 diff_set_subcommand(void)
 {
@@ -736,6 +740,8 @@ diff_subcommand_name_ref(void)
 {
 	diff_subcommand_rev[0] = 0;
 
+	diff_subcommand_unstaged = false;
+
 	if (opt_rev_args) {
 		argv_to_string(opt_rev_args, diff_subcommand_rev,
 			       sizeof(diff_subcommand_rev), " ");
@@ -747,6 +753,7 @@ diff_subcommand_name_ref(void)
 
 	} else {
 		diff_subcommand_msg = "Unstaged changes";
+		diff_subcommand_unstaged = true;
 	}
 }
 
@@ -765,10 +772,12 @@ diff_subcommand_update(struct view *view, const char *rev, enum open_flags flags
 			"%(fileargs)", NULL
 	};
 
-	if (!strcmp(rev, "%(revargs)"))
+	if (!strcmp(rev, "%(revargs)")) {
 		diff_subcommand_name_ref();
-	else
+	} else {
 		string_ncopy(diff_subcommand_rev, rev, strlen(rev));
+		diff_subcommand_msg = "Changes";
+	}
 
 	return begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
 }
@@ -828,8 +837,7 @@ diff_open(struct view *view, enum open_flags flags)
 		code = diff_bdiff_start(view, state, flags);
 	} else if (diff_is_subcommand(view)) {
 		code = diff_subcommand_update(view, "%(revargs)", flags);
-		state->retry_upstream = !*diff_subcommand_rev &&
-					!strcmp(diff_subcommand_msg, "Unstaged changes");
+		state->retry_upstream = diff_subcommand_unstaged;
 	} else {
 		code = begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
 	}
@@ -2412,6 +2420,10 @@ diff_read(struct view *view, struct buffer *buf, bool force_stop)
 
 			return false;
 		}
+
+		if (view->lines == 0 && !force_stop &&
+		    diff_subcommand_retry_upstream(view, state))
+			return false;
 
 		/* Fall back to retry if no diff will be shown. */
 		if (view->lines == 0 && opt_file_args) {

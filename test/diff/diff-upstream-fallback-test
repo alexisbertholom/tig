@@ -1,0 +1,90 @@
+#!/bin/sh
+#
+# Test what `tig diff` shows when the working tree has nothing to show.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=14
+
+setup_fallback_repo()
+{
+	git_init .
+
+	git_add a "one"
+	git_commit -m "Initial"
+
+	# An upstream, without a remote to push to: the tracking ref and the
+	# configuration a push would have left behind are all it takes.
+	git update-ref refs/remotes/origin/master master
+	git config remote.origin.url ../remote.git
+	git config remote.origin.fetch "+refs/heads/*:refs/remotes/origin/*"
+	git config branch.master.remote origin
+	git config branch.master.merge refs/heads/master
+
+	git_add a "one and two"
+	git_commit -m "Committed, not pushed"
+}
+
+in_work_dir setup_fallback_repo
+
+# A clean working tree: the upstream is compared instead, and the title says
+# so rather than leaving an empty view to explain itself.
+test_case clean \
+ --script=':6' \
+ --args='diff' <<EOF
+ a | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/a b/a
+index 43dd47e..97589d1 100644
+--- a/a
++++ b/a
+@@ -1 +1 @@
+-one
+\ No newline at end of file
++one and two
+\ No newline at end of file
+[diff] origin/master: Changes to 'a' - line 6 of 12                         100%
+EOF
+
+# With something to show, the working tree is what is shown.
+test_case dirty \
+ --before='printf "one and two and three" > a' \
+ --script=':6' \
+ --args='diff' <<EOF
+ a | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/a b/a
+index 97589d1..773afed 100644
+--- a/a
++++ b/a
+@@ -1 +1 @@
+-one and two
+\ No newline at end of file
++one and two and three
+\ No newline at end of file
+[diff] Unstaged changes to 'a' - line 6 of 12                               100%
+EOF
+
+# A comparison which was asked for is reported as it stands, empty or not.
+test_case asked \
+ --before='git checkout -- a' \
+ --args='diff HEAD' <<EOF
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+[diff]                                                                        0%
+EOF
+
+run_test_cases
