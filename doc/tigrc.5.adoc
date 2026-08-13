@@ -1147,6 +1147,8 @@ setting the *default* color option.
 |bdiff-change		|Marker of a modified commit.
 |bdiff-same		|Marker of an unchanged commit.
 |bdiff-move-change	|Marker of a commit both reordered and modified.
+|bdiff-ctx		|Marker of a commit whose context changed, not its patch.
+|bdiff-move-ctx		|Marker of a reordered commit whose context changed.
 |bdiff-section		|Heading of a section of the base diff view.
 |=============================================================================
 

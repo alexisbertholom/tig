@@ -200,12 +200,21 @@ commit of the compared range marked by how it relates to <rev>:
 	The commit kept its position, but its patch, its message or its
 	author changed.
 
+[ctx]::
+	The commit does the same thing to the same file, only to other lines:
+	what changed is the context its patch applies to, which the commits
+	rewritten around it moved.
+
 [same]::
 	Neither the position nor the contents of the commit changed. Only
 	its parent may have, as a result of the rewrite.
 
 [move-change]::
 	The commit was both reordered and modified.
+
+[move-ctx]::
+	The commit was reordered, and only the context its patch applies to
+	changed.
 
 Opening a marked commit shows, depending on what applies to it: the changes
 git-range-diff(1) does not report (the author date, the parents and the
@@ -231,8 +240,8 @@ do the same thing to the same place are compared word by word, and what
 changed between them is highlighted. See tigrc(5).
 
 The marker colors can be changed with the `bdiff-add`, `bdiff-del`,
-`bdiff-move`, `bdiff-from`, `bdiff-change`, `bdiff-same`, `bdiff-move-change`
-and `bdiff-section` color names, and those of the range diff with the
+`bdiff-move`, `bdiff-from`, `bdiff-change`, `bdiff-ctx`, `bdiff-same`,
+`bdiff-move-change`, `bdiff-move-ctx` and `bdiff-section` color names, and those of the range diff with the
 `bdiff-range-*` ones. See tigrc(5).
 
 EXAMPLES

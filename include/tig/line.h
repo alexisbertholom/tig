@@ -97,6 +97,8 @@ struct ref;
 	_(BDIFF_CHANGE,		""), \
 	_(BDIFF_SAME,		""), \
 	_(BDIFF_MOVE_CHANGE,	""), \
+	_(BDIFF_CTX,		""), \
+	_(BDIFF_MOVE_CTX,	""), \
 	_(BDIFF_SECTION,	""), \
 	_(BDIFF_RANGE_OLD_MARK,	""), \
 	_(BDIFF_RANGE_NEW_MARK,	""), \

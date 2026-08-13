@@ -473,6 +473,8 @@ color bdiff-from		color244 default
 color bdiff-change		color208 default
 color bdiff-same		white	default
 color bdiff-move-change		color208 default	bold
+color bdiff-ctx			color244 default
+color bdiff-move-ctx		color244 default	bold
 color bdiff-section		cyan	default	bold
 # The range diff of a base diff compares two patches, so each of its lines
 # carries two markers: the outer one tells which patch the line belongs to, the

@@ -23,6 +23,10 @@
  * from their common ancestor, and classify every commit of both sides.
  */
 
+/* The body of a range diff is indented, to leave room for the marker telling
+ * which of the two patches each of its lines belongs to. */
+#define BDIFF_RANGE_INDENT 4
+
 enum bdiff_state {
 	BDIFF_NONE = 0,		/* Not part of the compared range. */
 	BDIFF_ADD,		/* Only exists on HEAD. */
@@ -32,6 +36,8 @@ enum bdiff_state {
 	BDIFF_CHANGE,		/* Kept its position, but was modified. */
 	BDIFF_SAME,		/* Unchanged, save for its parent. */
 	BDIFF_MOVE_CHANGE,	/* Both reordered and modified. */
+	BDIFF_CTX,		/* Only the context around it changed. */
+	BDIFF_MOVE_CTX,		/* Reordered, and only its context changed. */
 };
 
 struct bdiff_commit {
@@ -48,6 +54,8 @@ struct bdiff_commit {
 	bool old_side;		/* Belongs to the other revision, not HEAD. */
 	bool merge;
 	bool patch_differs;	/* The two sides do not have the same patch. */
+	bool range_diffed;	/* range-diff reported how the two sides differ. */
+	bool patch_body_differs;/* What differs is more than the context. */
 
 	/* Commits injected into the main view are chained together in the
 	 * order they are displayed; the last one points at the commit it is

@@ -1,0 +1,90 @@
+#!/bin/sh
+#
+# Test the commits which only differ by the context their patch applies to.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=12
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+setup_context_repo()
+{
+	rewrite_date="Sat Apr 4 13:29:36 2015 +0200"
+
+	printf 'one\ntwo\nthree\nfour\nfive\nsix\n' > lines
+	printf 'alpha\nbeta\ngamma\n' > other
+
+	git_init .
+
+	git add lines other
+	git_commit -m "Initial"
+
+	printf 'one\ntwo\nthree\nINSERTED\nfour\nfive\nsix\n' > lines
+	git add lines
+	git_commit -m "Insert a line"
+	inserting="$(git rev-parse HEAD)"
+
+	printf 'alpha\nBETA\ngamma\n' > other
+	git add other
+	git_commit -m "Edit the other file"
+	editing="$(git rev-parse HEAD)"
+
+	for name in a b c; do
+		git_add "$name" "$name"
+		git_commit -m "Add $name"
+		eval "adding_$name=$(git rev-parse HEAD)"
+	done
+
+	git branch old
+
+	# The branch is written again with the two commits touching a file
+	# moved past the ones which do not, and with a new commit editing the
+	# lines the inserting one applies to.  Cherry-picking keeps the author
+	# dates, the way a rebase would.
+	git reset -q --hard old~5
+
+	for name in a b c; do
+		eval "picked=\$adding_$name"
+		GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$picked" > /dev/null
+	done
+
+	printf 'one\nTWO-CHANGED\nthree\nfour\nfive\nsix\n' > lines
+	git add lines
+	git_commit -m "Change the context"
+
+	# The same commit, editing another line of the file than it used to.
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$editing" > /dev/null
+	printf 'alpha\nbeta\nGAMMA\n' > other
+	git add other
+	GIT_COMMITTER_DATE="$rewrite_date" git commit -q --amend --no-edit
+
+	# This one still inserts the same line, where the lines around it went.
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$inserting" > /dev/null
+}
+
+in_work_dir setup_context_repo
+
+# Both commits were moved past the same three and written again against what
+# the new commit left behind, but only one of them does something else than it
+# used to: the other merely applies to other lines.
+test_case context-only \
+ --args='--bdiff old' <<EOF
+* [master] [move-ctx] Insert a line
+* [move-change] Edit the other file
+* [add] Change the context
+* [same] Add c
+* [same] Add b
+* [same] Add a
+| * [from] Edit the other file
+| * [from] Insert a line
+I-' Initial
+ 
+[main] af1bb75d4d509cd54eb254ae987528ae1fe9c453 - commit 1 of 7             100%
+EOF
+
+run_test_cases

@@ -109,6 +109,8 @@ bdiff_state_label(enum bdiff_state state)
 	case BDIFF_CHANGE:	return "[change]";
 	case BDIFF_SAME:	return "[same]";
 	case BDIFF_MOVE_CHANGE:	return "[move-change]";
+	case BDIFF_CTX:		return "[ctx]";
+	case BDIFF_MOVE_CTX:	return "[move-ctx]";
 	default:		return NULL;
 	}
 }
@@ -124,6 +126,8 @@ bdiff_state_line_type(enum bdiff_state state)
 	case BDIFF_CHANGE:	return LINE_BDIFF_CHANGE;
 	case BDIFF_SAME:	return LINE_BDIFF_SAME;
 	case BDIFF_MOVE_CHANGE:	return LINE_BDIFF_MOVE_CHANGE;
+	case BDIFF_CTX:		return LINE_BDIFF_CTX;
+	case BDIFF_MOVE_CTX:	return LINE_BDIFF_MOVE_CTX;
 	default:		return LINE_DEFAULT;
 	}
 }
@@ -132,20 +136,23 @@ bool
 bdiff_state_shows_new(enum bdiff_state state)
 {
 	return state == BDIFF_ADD || state == BDIFF_MOVE || state == BDIFF_SAME ||
-	       state == BDIFF_CHANGE || state == BDIFF_MOVE_CHANGE;
+	       state == BDIFF_CHANGE || state == BDIFF_MOVE_CHANGE ||
+	       state == BDIFF_CTX || state == BDIFF_MOVE_CTX;
 }
 
 bool
 bdiff_state_shows_old(enum bdiff_state state)
 {
 	return state == BDIFF_DEL || state == BDIFF_FROM ||
-	       state == BDIFF_CHANGE || state == BDIFF_MOVE_CHANGE;
+	       state == BDIFF_CHANGE || state == BDIFF_MOVE_CHANGE ||
+	       state == BDIFF_CTX || state == BDIFF_MOVE_CTX;
 }
 
 bool
 bdiff_state_shows_range(enum bdiff_state state)
 {
-	return state == BDIFF_CHANGE || state == BDIFF_MOVE_CHANGE;
+	return state == BDIFF_CHANGE || state == BDIFF_MOVE_CHANGE ||
+	       state == BDIFF_CTX || state == BDIFF_MOVE_CTX;
 }
 
 void
@@ -448,7 +455,7 @@ bdiff_parse_id(char *text, char **id)
  * Parse one "1:  <id> = 2:  <id> title" line of the range-diff summary.  A
  * side which does not take part in the pair is reported as "-:  ------".
  */
-static void
+static struct bdiff_commit *
 bdiff_parse_pairing(char *line)
 {
 	struct bdiff_commit *old_commit = NULL;
@@ -459,17 +466,17 @@ bdiff_parse_pairing(char *line)
 
 	line = bdiff_parse_position(line, &old_pos);
 	if (!line)
-		return;
+		return NULL;
 	line = bdiff_parse_id(line, &old_id);
 
 	line = bdiff_skip_spaces(line);
 	if (!*line)
-		return;
+		return NULL;
 	sign = *line++;
 
 	line = bdiff_parse_position(line, &new_pos);
 	if (!line)
-		return;
+		return NULL;
 	bdiff_parse_id(line, &new_id);
 
 	if (old_id)
@@ -484,6 +491,7 @@ bdiff_parse_pairing(char *line)
 	if (new_commit) {
 		new_commit->pos = new_pos;
 		new_commit->patch_differs = sign != '=';
+		new_commit->range_diffed = sign == '!';
 	}
 
 	if (old_commit && new_commit) {
@@ -492,6 +500,27 @@ bdiff_parse_pairing(char *line)
 		new_commit->peer = old_commit->id;
 		new_commit->peer_pos = old_pos;
 	}
+
+	return new_commit;
+}
+
+/*
+ * A line of the diff between the two patches: the outer marker tells which of
+ * them has the line, the inner one what that patch does with it.  A line only
+ * one patch has, doing anything else than holding context, is the patch
+ * itself differing rather than what surrounds it.
+ */
+static bool
+bdiff_pairing_line_changes_patch(const char *line)
+{
+	if (strlen(line) <= BDIFF_RANGE_INDENT + 1)
+		return false;
+
+	if (line[BDIFF_RANGE_INDENT] != '-' && line[BDIFF_RANGE_INDENT] != '+')
+		return false;
+
+	return line[BDIFF_RANGE_INDENT + 1] == '-' ||
+	       line[BDIFF_RANGE_INDENT + 1] == '+';
 }
 
 static bool
@@ -515,6 +544,7 @@ bdiff_pair_commits(bool with_merges)
 {
 	char old_range[SIZEOF_STR], new_range[SIZEOF_STR];
 	const char *argv[10];
+	struct bdiff_commit *pair = NULL;
 	struct buffer buf;
 	struct io io;
 	int argc = 0;
@@ -526,7 +556,6 @@ bdiff_pair_commits(bool with_merges)
 	argv[argc++] = "git";
 	argv[argc++] = "range-diff";
 	argv[argc++] = "--no-color";
-	argv[argc++] = "--no-patch";
 	argv[argc++] = "--abbrev=40";
 	if (with_merges)
 		argv[argc++] = "--diff-merges=remerge";
@@ -537,8 +566,16 @@ bdiff_pair_commits(bool with_merges)
 	if (!io_run(&io, IO_RD, NULL, NULL, argv))
 		return error("Failed to run git range-diff");
 
-	while (io_get(&io, &buf, '\n', true))
-		bdiff_parse_pairing(buf.data);
+	while (io_get(&io, &buf, '\n', true)) {
+		char *line = buf.data;
+
+		/* The pairs are listed in the first column, the diff between
+		 * the two patches of a pair is indented under it. */
+		if (*line && !isspace((unsigned char) *line))
+			pair = bdiff_parse_pairing(line);
+		else if (pair && bdiff_pairing_line_changes_patch(line))
+			pair->patch_body_differs = true;
+	}
 
 	io_done(&io);
 
@@ -683,6 +720,25 @@ bdiff_metadata_differs(struct bdiff_commit *new_commit, struct bdiff_commit *old
 	return false;
 }
 
+/*
+ * A commit whose neighbours were rewritten around it is written again itself,
+ * against the lines they left behind: what it does to the file is the same,
+ * only the context it does it in has moved.  range-diff reports it as a
+ * commit that differs, which says more than there is to say about it.
+ */
+static bool
+bdiff_context_only(struct bdiff_commit *new_commit, struct bdiff_commit *old_commit)
+{
+	/* Commits paired on their message have no diff between their patches
+	 * to tell what differs; they were paired because it differs a lot. */
+	if (!new_commit->range_diffed || new_commit->patch_body_differs)
+		return false;
+
+	return new_commit->message_hash == old_commit->message_hash &&
+	       new_commit->author_time.sec == old_commit->author_time.sec &&
+	       !ident_compare(new_commit->author, old_commit->author);
+}
+
 static void
 bdiff_classify(void)
 {
@@ -705,13 +761,16 @@ bdiff_classify(void)
 		struct bdiff_commit *new_commit = pairs[i];
 		struct bdiff_commit *old_commit = string_map_get(&bdiff_commits, new_commit->peer);
 		bool changed = old_commit && bdiff_metadata_differs(new_commit, old_commit);
+		bool context = changed && bdiff_context_only(new_commit, old_commit);
 
 		if (kept[i]) {
-			new_commit->state = changed ? BDIFF_CHANGE : BDIFF_SAME;
+			new_commit->state = !changed ? BDIFF_SAME
+					  : context ? BDIFF_CTX : BDIFF_CHANGE;
 			if (old_commit)
 				old_commit->state = new_commit->state;
 		} else {
-			new_commit->state = changed ? BDIFF_MOVE_CHANGE : BDIFF_MOVE;
+			new_commit->state = !changed ? BDIFF_MOVE
+					  : context ? BDIFF_MOVE_CTX : BDIFF_MOVE_CHANGE;
 			if (old_commit)
 				old_commit->state = BDIFF_FROM;
 		}

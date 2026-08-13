@@ -409,8 +409,6 @@ diff_bdiff_section_at(struct diff_state *state, unsigned long lineno)
  * stand out.
  */
 
-#define BDIFF_RANGE_INDENT 4
-
 enum bdiff_range_outer {
 	BDIFF_RANGE_BOTH,
 	BDIFF_RANGE_OLD,
