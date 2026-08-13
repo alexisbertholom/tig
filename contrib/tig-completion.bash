@@ -127,9 +127,19 @@ __tig_main () {
 		esac
 		# tig parses the revision of these itself, so git never sees it
 		case "$prev" in
-		--bdiff|--bdiff-base|--bdiff-onto)
+		--bdiff-base|--bdiff-onto)
 			__tig_complete_revisions
 			return
+			;;
+		--bdiff)
+			# its revision is optional, and given up as soon as
+			# what follows is an option
+			case "$cur" in
+			-*)	;;
+			*)	__tig_complete_revisions
+				return
+				;;
+			esac
 			;;
 		esac
 		case "$cur" in
