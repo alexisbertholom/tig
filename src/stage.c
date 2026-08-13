@@ -761,7 +761,7 @@ stage_select(struct view *view, struct line *line)
 				: stage_line_type == LINE_STAT_UNSTAGED ? "Unstaged changes"
 				: NULL;
 
-	diff_common_select(view, line, changes_msg);
+	diff_common_select(view, line, changes_msg, view->ops->id);
 }
 
 static enum status_code

@@ -45,7 +45,7 @@ index 43dd47e..773afed 100644
 \ No newline at end of file
 +one and two and three
 \ No newline at end of file
-[diff] Press '<Enter>' to jump to file diff - line 1 of 12                  100%
+[diff] origin/master: Press '<Enter>' to jump to file diff - line 1 of 12   100%
 EOF
 
 # Git is asked first, so a ref really named _up keeps the name for itself:
@@ -65,7 +65,7 @@ index 97589d1..773afed 100644
 \ No newline at end of file
 +one and two and three
 \ No newline at end of file
-[diff] Press '<Enter>' to jump to file diff - line 1 of 12                  100%
+[diff] _up: Press '<Enter>' to jump to file diff - line 1 of 12             100%
 EOF
 
 run_test_cases

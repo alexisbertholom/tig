@@ -714,10 +714,59 @@ diff_edit_blob(struct view *view, struct line *line)
  * the commit it was opened on, as always. */
 static bool diff_subcommand;
 
+/* What the subcommand compares, for the view title: the revisions it was given,
+ * if any, and the changes they amount to. */
+static char diff_subcommand_rev[SIZEOF_REF];
+static const char *diff_subcommand_msg;
+
 void
 diff_set_subcommand(void)
 {
 	diff_subcommand = true;
+}
+
+static bool
+diff_is_subcommand(struct view *view)
+{
+	return diff_subcommand && !view->prev;
+}
+
+static void
+diff_subcommand_name_ref(void)
+{
+	diff_subcommand_rev[0] = 0;
+
+	if (opt_rev_args) {
+		argv_to_string(opt_rev_args, diff_subcommand_rev,
+			       sizeof(diff_subcommand_rev), " ");
+		diff_subcommand_msg = "Changes";
+
+	} else if (argv_contains(opt_cmdline_args, "--cached") ||
+		   argv_contains(opt_cmdline_args, "--staged")) {
+		diff_subcommand_msg = "Staged changes";
+
+	} else {
+		diff_subcommand_msg = "Unstaged changes";
+	}
+}
+
+/* The "diff" subcommand names no commit to show: compare with git-diff(1),
+ * which also covers the working tree and the index. */
+static enum status_code
+diff_subcommand_update(struct view *view, enum open_flags flags)
+{
+	const char *diff_argv[] = {
+		"git", "diff", encoding_arg, "--patch-with-stat",
+			diff_stat_width_arg(), diff_stat_name_width_arg(),
+			diff_stat_graph_width_arg(), diff_context_arg(),
+			ignore_space_arg(), DIFF_ARGS, "%(cmdlineargs)",
+			"--no-color", word_diff_arg(), "%(revargs)", "--",
+			"%(fileargs)", NULL
+	};
+
+	diff_subcommand_name_ref();
+
+	return begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
 }
 
 static enum status_code
@@ -731,16 +780,6 @@ diff_open(struct view *view, enum open_flags flags)
 			show_notes_arg(), diff_context_arg(), ignore_space_arg(),
 			DIFF_ARGS, "%(cmdlineargs)", "--no-color", word_diff_arg(),
 			"%(commit)", "--", "%(fileargs)", NULL
-	};
-	/* The "diff" subcommand names no commit to show: compare with
-	 * git-diff(1), which also covers the working tree and the index. */
-	const char *diff_subcommand_argv[] = {
-		"git", "diff", encoding_arg, "--patch-with-stat",
-			diff_stat_width_arg(), diff_stat_name_width_arg(),
-			diff_stat_graph_width_arg(), diff_context_arg(),
-			ignore_space_arg(), DIFF_ARGS, "%(cmdlineargs)",
-			"--no-color", word_diff_arg(), "%(revargs)", "--",
-			"%(fileargs)", NULL
 	};
 	struct diff_state *state = view->private;
 	enum status_code code;
@@ -757,9 +796,8 @@ diff_open(struct view *view, enum open_flags flags)
 
 	if (state->bdiff) {
 		code = diff_bdiff_start(view, state, flags);
-	} else if (diff_subcommand && !view->prev) {
-		code = begin_update(view, NULL, diff_subcommand_argv,
-				    flags | OPEN_WITH_STDERR);
+	} else if (diff_is_subcommand(view)) {
+		code = diff_subcommand_update(view, flags);
 	} else {
 		code = begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
 	}
@@ -2655,7 +2693,8 @@ diff_request(struct view *view, enum request request, struct line *line)
 }
 
 void
-diff_common_select(struct view *view, struct line *line, const char *changes_msg)
+diff_common_select(struct view *view, struct line *line, const char *changes_msg,
+		   const char *id)
 {
 	if (line->type == LINE_DIFF_STAT) {
 		struct line *header = diff_find_header_from_stat(view, line);
@@ -2695,7 +2734,7 @@ diff_common_select(struct view *view, struct line *line, const char *changes_msg
 			view->env->blob[0] = 0;
 		} else {
 			view->env->lineno = view->env->goto_lineno = (line - view->line) + 1;
-			string_ncopy(view->ref, view->ops->id, strlen(view->ops->id));
+			string_ncopy(view->ref, id, strlen(id));
 		}
 	}
 	pager_select(view, line);
@@ -2704,7 +2743,22 @@ diff_common_select(struct view *view, struct line *line, const char *changes_msg
 static void
 diff_select(struct view *view, struct line *line)
 {
-	diff_common_select(view, line, "Changes");
+	if (!diff_is_subcommand(view)) {
+		diff_common_select(view, line, "Changes", view->ops->id);
+		return;
+	}
+
+	diff_common_select(view, line, diff_subcommand_msg,
+			   *diff_subcommand_rev ? diff_subcommand_rev : diff_subcommand_msg);
+
+	/* What the view compares is what it is about, so it comes first; the
+	 * rest of the title tells what the line under the cursor is. */
+	if (*diff_subcommand_rev && strcmp(view->ref, diff_subcommand_rev)) {
+		char ref[SIZEOF_STR];
+
+		if (string_format(ref, "%s: %s", diff_subcommand_rev, view->ref))
+			string_ncopy(view->ref, ref, strlen(ref));
+	}
 }
 
 static struct view_ops diff_ops = {

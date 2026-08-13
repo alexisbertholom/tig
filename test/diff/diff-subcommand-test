@@ -1,15 +1,11 @@
 #!/bin/sh
 #
-# Test the diff subcommand.
+# Test the diff subcommand, and what the view title says it compares.
 
 . libtest.sh
 . libgit.sh
 
 export LINES=16
-
-steps '
-	:save-display diff-rev.screen
-'
 
 setup_diff_repo()
 {
@@ -22,19 +18,22 @@ setup_diff_repo()
 	git_commit -m "Second"
 
 	# The working tree takes part in the comparison, as it does for
-	# git-diff(1) and unlike what the shown commit of a diff view is.
+	# git-diff(1) and unlike the commit a diff view shows.
 	file a "one and more"
+
+	git_add c "three"
 }
 
 in_work_dir setup_diff_repo
 
-test_tig diff HEAD~1
-
-assert_equals 'diff-rev.screen' <<EOF
+test_case revision \
+ --script=':6' \
+ --args='diff HEAD~1' <<EOF
  a | 2 +-
  b | 1 +
- 2 files changed, 2 insertions(+), 1 deletion(-)
-
+ c | 1 +
+ 3 files changed, 3 insertions(+), 1 deletion(-)
+ 
 diff --git a/a b/a
 index 43dd47e..bbe8cef 100644
 --- a/a
@@ -44,6 +43,47 @@ index 43dd47e..bbe8cef 100644
 \ No newline at end of file
 +one and more
 \ No newline at end of file
-diff --git a/b b/b
-[diff] Press '<Enter>' to jump to file diff - line 1 of 21                   66%
+[diff] HEAD~1: Changes to 'a' - line 6 of 30                                 46%
 EOF
+
+test_case unstaged \
+ --script=':6' \
+ --args='diff' <<EOF
+ a | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+ 
+diff --git a/a b/a
+index 43dd47e..bbe8cef 100644
+--- a/a
++++ b/a
+@@ -1 +1 @@
+-one
+\ No newline at end of file
++one and more
+\ No newline at end of file
+ 
+ 
+[diff] Unstaged changes to 'a' - line 6 of 12                               100%
+EOF
+
+test_case staged \
+ --script=':6' \
+ --args='diff --cached' <<EOF
+ c | 1 +
+ 1 file changed, 1 insertion(+)
+ 
+diff --git a/c b/c
+new file mode 100644
+index 0000000..1d19714
+--- /dev/null
++++ b/c
+@@ -0,0 +1 @@
++three
+\ No newline at end of file
+ 
+ 
+ 
+[diff] Staged changes to 'c' - line 6 of 11                                 100%
+EOF
+
+run_test_cases
