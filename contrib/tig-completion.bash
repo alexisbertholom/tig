@@ -108,7 +108,7 @@ __tig_complete_options () {
 }
 
 __tig_main () {
-	local i c=1 command dashdash __git_repo_path
+	local i c=1 command dashdash __git_repo_path __git_C_args
 
 	# past a --, tig parses nothing of its own: what follows names paths
 	for ((i = 1; i < cword; i++)); do
@@ -119,6 +119,12 @@ __tig_main () {
 	done
 
 	if [ -z "$dashdash" ]; then
+		case "$prev" in
+		-C)
+			# a directory, which bash completes on its own
+			return
+			;;
+		esac
 		# tig parses the revision of these itself, so git never sees it
 		case "$prev" in
 		--bdiff|--bdiff-base|--bdiff-onto)
@@ -139,9 +145,14 @@ __tig_main () {
 		i="${words[c]}"
 		case "$i" in
 		--)	command="log"; break;;
-		-C)	return;;
 		--bdiff-base|--bdiff-onto)
 			c=$((++c));;	# skips the revision it takes
+		-C)	# tig runs from there, so git must be asked from there
+			case "${words[c+1]-}" in
+			-*|"")	;;
+			*)	c=$((++c))
+				__git_C_args=(-C "${words[c]}");;
+			esac;;
 		--bdiff)
 			# the revision is optional: tig takes the next
 			# parameter only when it is not an option
