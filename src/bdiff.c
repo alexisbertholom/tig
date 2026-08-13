@@ -297,6 +297,7 @@ bdiff_harvest(struct bdiff_side *side, bool old_side, const char *base, const ch
 	};
 	struct bdiff_commit *commit = NULL;
 	uint64_t hash = 0;
+	int blank_lines = 0;
 	int field = 0;
 	struct buffer buf;
 	struct io io;
@@ -325,6 +326,7 @@ bdiff_harvest(struct bdiff_side *side, bool old_side, const char *base, const ch
 
 			commit = bdiff_add_commit(side, old_side, line, parents);
 			hash = 0xcbf29ce484222325ULL;
+			blank_lines = 0;
 			field = 0;
 			continue;
 		}
@@ -340,10 +342,27 @@ bdiff_harvest(struct bdiff_side *side, bool old_side, const char *base, const ch
 		case 1:
 			commit->subject = bdiff_strdup(line);
 			/* Fall through; the subject is part of the message. */
-		default:
-			hash = bdiff_hash(hash, line, strlen(line));
+		default: {
+			size_t len = strlen(line);
+
+			/* Rewriting a commit reflows the whitespace at the end
+			 * of its message, so leave it out of the hash: it says
+			 * nothing about the message being the same one. */
+			while (len > 0 && isspace((unsigned char) line[len - 1]))
+				len--;
+
+			if (!len) {
+				blank_lines++;
+				break;
+			}
+
+			for (; blank_lines > 0; blank_lines--)
+				hash = bdiff_hash(hash, "\n", 1);
+
+			hash = bdiff_hash(hash, line, len);
 			hash = bdiff_hash(hash, "\n", 1);
 			break;
+		}
 		}
 	}
 

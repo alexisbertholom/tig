@@ -751,22 +751,52 @@ diff_subcommand_name_ref(void)
 }
 
 /* The "diff" subcommand names no commit to show: compare with git-diff(1),
- * which also covers the working tree and the index. */
+ * which also covers the working tree and the index.  <rev> replaces the
+ * revisions of the command line when there is nothing to show without one. */
 static enum status_code
-diff_subcommand_update(struct view *view, enum open_flags flags)
+diff_subcommand_update(struct view *view, const char *rev, enum open_flags flags)
 {
 	const char *diff_argv[] = {
 		"git", "diff", encoding_arg, "--patch-with-stat",
 			diff_stat_width_arg(), diff_stat_name_width_arg(),
 			diff_stat_graph_width_arg(), diff_context_arg(),
 			ignore_space_arg(), DIFF_ARGS, "%(cmdlineargs)",
-			"--no-color", word_diff_arg(), "%(revargs)", "--",
+			"--no-color", word_diff_arg(), rev, "--",
 			"%(fileargs)", NULL
 	};
 
-	diff_subcommand_name_ref();
+	if (!strcmp(rev, "%(revargs)"))
+		diff_subcommand_name_ref();
+	else
+		string_ncopy(diff_subcommand_rev, rev, strlen(rev));
 
 	return begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
+}
+
+/* A clean working tree has nothing to say, and saying it takes a whole view.
+ * Compare with the upstream instead: it is the other question asked of a
+ * branch, and the one left with an answer.  Only for `tig diff` on its own:
+ * a comparison which was asked for is reported as it stands, empty or not. */
+static bool
+diff_subcommand_retry_upstream(struct view *view, struct diff_state *state)
+{
+	const char *upstream;
+
+	if (!state->retry_upstream)
+		return false;
+
+	state->retry_upstream = false;
+
+	upstream = repo_upstream_rev();
+	if (!upstream)
+		return false;
+
+	if (diff_subcommand_update(view, upstream, OPEN_EXTRA) != SUCCESS)
+		return false;
+
+	report("No unstaged changes; comparing with %s", upstream);
+
+	return true;
 }
 
 static enum status_code
@@ -797,7 +827,9 @@ diff_open(struct view *view, enum open_flags flags)
 	if (state->bdiff) {
 		code = diff_bdiff_start(view, state, flags);
 	} else if (diff_is_subcommand(view)) {
-		code = diff_subcommand_update(view, flags);
+		code = diff_subcommand_update(view, "%(revargs)", flags);
+		state->retry_upstream = !*diff_subcommand_rev &&
+					!strcmp(diff_subcommand_msg, "Unstaged changes");
 	} else {
 		code = begin_update(view, NULL, diff_argv, flags | OPEN_WITH_STDERR);
 	}
