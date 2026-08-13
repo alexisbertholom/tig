@@ -1,0 +1,90 @@
+#!/bin/sh
+#
+# Test where the diff view of a base diff opens when moving between commits.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=14
+
+tigrc <<EOF
+set line-graphics = ascii
+set vertical-split = no
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+set diff-view = line-number:no text
+EOF
+
+setup_long_diff_repo()
+{
+	git_init .
+
+	seq 1 60 > big
+	git add big
+	git_commit -m "Initial"
+
+	seq 1 60 | sed 's/^30$/thirty/' > big
+	git add big
+	git_commit -m "Kept commit"
+
+	seq 1 60 | sed 's/^30$/thirty/;s/^50$/fifty/' > big
+	git add big
+	git_commit -m "Amended commit"
+
+	git branch old
+
+	seq 1 60 | sed 's/^30$/thirty/;s/^50$/fifty and more/' > big
+	git add big
+	GIT_COMMITTER_DATE="Sat Apr 4 13:29:36 2015 +0200" git commit -q --amend --no-edit
+}
+
+in_work_dir setup_long_diff_repo
+
+# Reading down the diff of one commit and moving to another opens the diff of
+# that one at its top, rather than where the previous one was left.
+test_case another-commit \
+ --args='--bdiff old' \
+ --script='
+	:2
+	<Enter>
+	:move-page-down
+	:previous
+' <<EOF
+* [master] [change] Amended commit
+* Kept commit
+I Initial
+ 
+[main] 33e8eb8ad54912c4277667d14bda9522293de0cc - commit 1 of 3             100%
+[change] range diff
+    @@ big: thirty
+      48
+      49
+     -50
+    -+fifty
+    ++fifty and more
+[diff] 33e8eb8ad54912c4277667d14bda9522293de0cc - line 1 of 64               10%
+EOF
+
+# Refreshing stays where it was, though: it is the same diff.
+test_case refreshed \
+ --args='--bdiff old' \
+ --script='
+	<Enter>
+	:move-page-down
+	:refresh
+' <<EOF
+* [master] [change] Amended commit
+* Kept commit
+I Initial
+ 
+[main] 33e8eb8ad54912c4277667d14bda9522293de0cc - commit 1 of 3             100%
+      51
+      52
+      53
+ 
+[change] commit 33e8eb8ad54912c4277667d14bda9522293de0cc
+commit 33e8eb8ad54912c4277667d14bda9522293de0cc
+Refs: [master]
+[diff] 33e8eb8ad54912c4277667d14bda9522293de0cc - line 8 of 64               21%
+EOF
+
+run_test_cases

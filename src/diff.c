@@ -363,6 +363,15 @@ diff_bdiff_start(struct view *view, struct diff_state *state, enum open_flags fl
 	if (view->lines)
 		return SUCCESS;
 
+	/* Opening the view on another commit starts at the top of it, which
+	 * load_view() arranges by forgetting where the view was left, but only
+	 * for a view its open leaves empty.  The sections below are lines of
+	 * its own, so the position has to be forgotten here instead, or the
+	 * diff of the next commit opens wherever the previous one was read up
+	 * to. */
+	if (view->prev && !(flags & (OPEN_RELOAD | OPEN_REFRESH)))
+		clear_position(&view->prev_pos);
+
 	for (state->bdiff_next = 0; state->bdiff_next < first; state->bdiff_next++)
 		if (!diff_bdiff_add_metadata(view, state))
 			return error("Failed to show the base diff metadata");
