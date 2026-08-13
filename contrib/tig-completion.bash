@@ -12,16 +12,18 @@
 # which most tig users should already have available at this point.
 # To use these routines:
 #
-#    1) Copy this file to somewhere (e.g. ~/.bash_completion.d/tig).
+#    1) Copy this file to the completion directory of bash-completion,
+#       under the name bash looks the command up by:
 #
-#    2) Add the following line to your .bashrc:
+#           ~/.local/share/bash-completion/completions/tig
 #
-#           source ~/.bash_completion.d/tig
+#       bash-completion reads that directory on the first tig
+#       completion, so shells started afterwards need nothing else.
 #
-#       Note that most Linux distributions source everything in
-#       ~/.bash_completion.d/ automatically at bash startup, so you
-#       have to source this script manually only in shells that were
-#       already running before.
+#    2) In shells that were already running, and in setups without
+#       bash-completion, source the file by hand instead:
+#
+#           source ~/.local/share/bash-completion/completions/tig
 #
 #    3) You may want to make sure the git executable is available
 #       in your PATH before this script is sourced, as some caching

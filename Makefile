@@ -135,9 +135,17 @@ endif
 
 export sysconfdir
 
+# The completion scripts are left where they are: which directory a shell
+# reads them from is the user's business, so only say where to find them.
 install: all
 	$(QUIET_INSTALL)tools/install.sh bin $(EXE) "$(DESTDIR)$(bindir)"
 	$(QUIET_INSTALL)tools/install.sh data tigrc "$(DESTDIR)$(sysconfdir)"
+	$(QUIET_NOTICE)printf '%s\n' \
+		'shell completions are not installed, copy them yourself:' \
+		'              bash  $(CURDIR)/contrib/tig-completion.bash' \
+		'                    -> ~/.local/share/bash-completion/completions/tig' \
+		'              zsh   $(CURDIR)/contrib/tig-completion.zsh' \
+		'                    -> _tig in a directory of your $$fpath'
 
 install-doc-man: doc-man
 	$(Q)$(foreach doc, $(filter %.1, $(MANDOC)), \
@@ -472,6 +480,7 @@ QUIET_DB2PDF		= $(Q:@=@echo    '    DB2PDF  '$@;)
 # tools/install.sh will print 'file -> $install_dir/file'
 QUIET_INSTALL		= $(Q:@=@printf  '   INSTALL  ';)
 QUIET_INSTALL_EACH	= $(Q:@=printf   '   INSTALL  ';)
+QUIET_NOTICE		= $(Q:@=@printf  '    NOTICE  ';)
 QUIET_UNINSTALL		= $(Q:@=@printf  ' UNINSTALL  ';)
 QUIET_UNINSTALL_EACH	= $(Q:@=printf   ' UNINSTALL  ';)
 QUIET_TEST		= $(Q:@=@echo    '      TEST  '$@;)
