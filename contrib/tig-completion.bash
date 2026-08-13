@@ -57,6 +57,13 @@ __tig_options="
 	-h --help
 	-C
 "
+# Comparing HEAD with another revision is tig's own business, and is asked
+# for before any subcommand.
+__tig_bdiff_options="
+	--bdiff
+	--bdiff-base=
+	--bdiff-onto=
+"
 __tig_commands="
 	blame
 	diff
@@ -68,15 +75,80 @@ __tig_commands="
 	status
 	show
 "
+# Names tig resolves on its own wherever a revision is expected, and which
+# git therefore knows nothing about.
+__tig_revision_aliases="
+	_up
+"
+
+# Offer tig's own revision names next to whatever git already completed.
+__tig_complete_revision_aliases () {
+	local cur_="${1-$cur}" pfx="${2-}" alias
+	for alias in $__tig_revision_aliases; do
+		if [[ $alias == "$cur_"* ]]; then
+			COMPREPLY+=("$pfx$alias ")
+		fi
+	done
+}
+
+__tig_complete_revisions () {
+	local cur_="${1-$cur}" pfx="${2-}"
+	__git_complete_refs --cur="$cur_" --pfx="$pfx"
+	__tig_complete_revision_aliases "$cur_" "$pfx"
+}
+
+# __gitcomp overwrites the leading entries of COMPREPLY instead of appending
+# to it, so let it fill an empty array and put what was there back in front.
+__tig_complete_options () {
+	local completed=("${COMPREPLY[@]}")
+
+	COMPREPLY=()
+	__gitcomp "$1"
+	COMPREPLY=("${completed[@]}" "${COMPREPLY[@]}")
+}
 
 __tig_main () {
+	local i c=1 command dashdash __git_repo_path
+
+	# past a --, tig parses nothing of its own: what follows names paths
+	for ((i = 1; i < cword; i++)); do
+		if [ "${words[i]}" = "--" ]; then
+			dashdash=yes
+			break
+		fi
+	done
+
+	if [ -z "$dashdash" ]; then
+		# tig parses the revision of these itself, so git never sees it
+		case "$prev" in
+		--bdiff|--bdiff-base|--bdiff-onto)
+			__tig_complete_revisions
+			return
+			;;
+		esac
+		case "$cur" in
+		--bdiff=*|--bdiff-base=*|--bdiff-onto=*)
+			__tig_complete_revisions "${cur#*=}" "${cur%%=*}="
+			return
+			;;
+		esac
+	fi
+
 	# parse already existing parameters
-	local i c=1 command __git_repo_path
 	while [ $c -lt $cword ]; do
 		i="${words[c]}"
 		case "$i" in
 		--)	command="log"; break;;
 		-C)	return;;
+		--bdiff-base|--bdiff-onto)
+			c=$((++c));;	# skips the revision it takes
+		--bdiff)
+			# the revision is optional: tig takes the next
+			# parameter only when it is not an option
+			case "${words[c+1]-}" in
+			-*|"")	;;
+			*)	c=$((++c));;
+			esac;;
 		-*)	;;
 		*)	command="$i"; break ;;
 		esac
@@ -87,18 +159,30 @@ __tig_main () {
 	case "$command" in
 		refs|status|stash)
 			__gitcomp "$__tig_options"
+			return
+			;;
+		grep)
+			# takes a pattern, not a revision
+			__git_complete_command grep
+			return
 			;;
 		reflog)
 			__git_complete_command log
 			;;
 		"")
 			__git_complete_command log
-			__gitcomp "$__tig_options $__tig_commands"
+			__tig_complete_options \
+				"$__tig_options $__tig_bdiff_options $__tig_commands"
 			;;
 		*)
 			__git_complete_command $command
 			;;
 	esac
+
+	# the revisions git just completed can also be spelled tig's way
+	if [ -z "$dashdash" ]; then
+		__tig_complete_revision_aliases
+	fi
 }
 
 # we use internal git-completion functions, so wrap _tig for all necessary
