@@ -64,6 +64,7 @@ const char *diff_stat_graph_width_arg(void)
 	return opt_diff_stat_group ? "--stat-graph-width=20" : "";
 }
 static bool diff_refine_flush(struct view *view, struct diff_state *state);
+static bool diff_refine_push(struct diff_state *state, const char *data, enum line_type type);
 static void diff_refine_free(struct diff_refine **rp);
 static void diff_statgrp_free(struct diff_stat_group **gp);
 static void diff_stat_rows_free(struct diff_stat_rows **rp);
@@ -168,11 +169,35 @@ diff_bdiff_begin_section(struct view *view, struct diff_state *state,
  * it, so reporting it would only add noise.
  */
 static bool
-diff_bdiff_metadata_lines(struct view *view,
+diff_bdiff_metadata_pair(struct view *view, struct diff_state *state,
+			 const char *label, const char *removed_value,
+			 const char *added_value)
+{
+	char removed[SIZEOF_STR];
+	char added[SIZEOF_STR];
+
+	if (!string_format(removed, "-%-12s%s", label, removed_value) ||
+	    !string_format(added, "+%-12s%s", label, added_value))
+		return false;
+
+	/* Told apart word by word, the way the two sides of a diff are. */
+	if (!state->native_refine)
+		return add_line_text(view, removed, LINE_DIFF_DEL) &&
+		       add_line_text(view, added, LINE_DIFF_ADD);
+
+	return diff_refine_push(state, removed, LINE_DIFF_DEL) &&
+	       diff_refine_push(state, added, LINE_DIFF_ADD) &&
+	       diff_refine_flush(view, state);
+}
+
+static bool
+diff_bdiff_metadata_lines(struct view *view, struct diff_state *state,
 			  const struct bdiff_commit *new_commit,
 			  const struct bdiff_commit *old_commit,
 			  bool add_lines)
 {
+	char removed[SIZEOF_STR];
+	char added[SIZEOF_STR];
 	bool changed = false;
 
 	if (!new_commit || !old_commit)
@@ -181,28 +206,30 @@ diff_bdiff_metadata_lines(struct view *view,
 	if (ident_compare(new_commit->author, old_commit->author)) {
 		changed = true;
 		if (add_lines &&
-		    (!add_line_format(view, LINE_DIFF_DEL, "-Author:     %s <%s>",
-				      old_commit->author->name, old_commit->author->email) ||
-		     !add_line_format(view, LINE_DIFF_ADD, "+Author:     %s <%s>",
-				      new_commit->author->name, new_commit->author->email)))
+		    (!string_format(removed, "%s <%s>", old_commit->author->name,
+				    old_commit->author->email) ||
+		     !string_format(added, "%s <%s>", new_commit->author->name,
+				    new_commit->author->email) ||
+		     !diff_bdiff_metadata_pair(view, state, "Author:", removed, added)))
 			return false;
 	}
 
 	if (new_commit->author_time.sec != old_commit->author_time.sec) {
 		changed = true;
 		if (add_lines &&
-		    (!add_line_format(view, LINE_DIFF_DEL, "-AuthorDate: %s",
-				      mkdate(&old_commit->author_time, DATE_DEFAULT, false, NULL)) ||
-		     !add_line_format(view, LINE_DIFF_ADD, "+AuthorDate: %s",
-				      mkdate(&new_commit->author_time, DATE_DEFAULT, false, NULL))))
+		    (!string_format(removed, "%s",
+				    mkdate(&old_commit->author_time, DATE_DEFAULT, false, NULL)) ||
+		     !string_format(added, "%s",
+				    mkdate(&new_commit->author_time, DATE_DEFAULT, false, NULL)) ||
+		     !diff_bdiff_metadata_pair(view, state, "AuthorDate:", removed, added)))
 			return false;
 	}
 
 	if (bdiff_parents_differ(new_commit, old_commit)) {
 		changed = true;
 		if (add_lines &&
-		    (!add_line_format(view, LINE_DIFF_DEL, "-Parents:    %s", old_commit->parents) ||
-		     !add_line_format(view, LINE_DIFF_ADD, "+Parents:    %s", new_commit->parents)))
+		    !diff_bdiff_metadata_pair(view, state, "Parents:",
+					      old_commit->parents, new_commit->parents))
 			return false;
 	}
 
@@ -213,8 +240,9 @@ diff_bdiff_metadata_lines(struct view *view,
 	    new_commit->pos != old_commit->pos) {
 		changed = true;
 		if (add_lines &&
-		    (!add_line_format(view, LINE_DIFF_DEL, "-Position:   %d", old_commit->pos) ||
-		     !add_line_format(view, LINE_DIFF_ADD, "+Position:   %d", new_commit->pos)))
+		    (!string_format(removed, "%d", old_commit->pos) ||
+		     !string_format(added, "%d", new_commit->pos) ||
+		     !diff_bdiff_metadata_pair(view, state, "Position:", removed, added)))
 			return false;
 	}
 
@@ -241,7 +269,7 @@ diff_bdiff_plan(struct view *view, struct diff_state *state)
 	state->bdiff_planned = 0;
 	state->bdiff_next = 0;
 
-	if (diff_bdiff_metadata_lines(view, new_commit, old_commit, false))
+	if (diff_bdiff_metadata_lines(view, state, new_commit, old_commit, false))
 		state->bdiff_plan[state->bdiff_planned++] = BDIFF_SECTION_META;
 
 	if (bdiff_state_shows_range(commit->state) && new_id && old_id)
@@ -307,7 +335,7 @@ static bool
 diff_bdiff_add_metadata(struct view *view, struct diff_state *state)
 {
 	return !!diff_bdiff_begin_section(view, state, BDIFF_SECTION_META, NULL) &&
-	       diff_bdiff_metadata_lines(view,
+	       diff_bdiff_metadata_lines(view, state,
 					 bdiff_lookup(state->bdiff_new_id),
 					 bdiff_lookup(state->bdiff_old_id), true);
 }
@@ -845,8 +873,17 @@ diff_open(struct view *view, enum open_flags flags)
 	}
 
 	if (state->bdiff) {
-		code = diff_bdiff_start(view, state, flags);
-	} else if (diff_is_subcommand(view)) {
+		/* The sections rendered from what is already known are added
+		 * during the open, so how their lines are to be highlighted
+		 * has to be settled by then. */
+		code = diff_init_highlight(view, state);
+		if (code != SUCCESS)
+			return code;
+
+		return diff_bdiff_start(view, state, flags);
+	}
+
+	if (diff_is_subcommand(view)) {
 		code = diff_subcommand_update(view, "%(revargs)", flags);
 		state->retry_upstream = diff_subcommand_unstaged;
 	} else {
