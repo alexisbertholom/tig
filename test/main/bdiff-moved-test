@@ -1,0 +1,70 @@
+#!/bin/sh
+#
+# Test which of two swapped commits is reported as the one that moved.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=12
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+setup_swapped_repo()
+{
+	rewrite_date="Sat Apr 4 13:29:36 2015 +0200"
+
+	git_init .
+
+	git_add base "base"
+	git_commit -m "Initial"
+
+	for name in first second third fourth; do
+		git_add "$name" "$name"
+		git_commit -m "Commit $name"
+		eval "commit_$name=$(git rev-parse HEAD)"
+	done
+
+	git branch old
+
+	# The last two commits are swapped, and a commit is written between
+	# them.  Both readings of the order leave three commits in place: the
+	# one which moved is the one that ended up two positions away, not the
+	# one which stayed where it was.  Cherry-picking keeps the author
+	# dates, the way a rebase would.
+	git reset -q --hard old~4
+
+	for name in first second fourth; do
+		eval "picked=\$commit_$name"
+		GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$picked" > /dev/null
+	done
+
+	git_add inserted "inserted"
+	git_commit -m "Commit inserted"
+
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$commit_third" > /dev/null
+}
+
+in_work_dir setup_swapped_repo
+
+# "Commit fourth" reads before "Commit third" now, where it used to read
+# after: one of them moved.  The fourth is one position from where it was and
+# the third is two, so the third is the one reported as moved.
+test_case swapped \
+ --args='--bdiff old' <<EOF
+* [master] [move] Commit third
+* [add] Commit inserted
+* [same] Commit fourth
+| * [from] Commit third
+*-' [same] Commit second
+* [same] Commit first
+I Initial
+ 
+ 
+ 
+[main] 8f1996738954ea2a36c853fbb81f61162159d757 - commit 1 of 6             100%
+EOF
+
+run_test_cases

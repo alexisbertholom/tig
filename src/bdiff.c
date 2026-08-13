@@ -710,6 +710,51 @@ bdiff_find_kept_order(struct bdiff_commit **pairs, size_t pairs_len)
 	return kept;
 }
 
+static size_t
+bdiff_displacement(struct bdiff_commit *commit)
+{
+	return commit->pos > commit->peer_pos ? commit->pos - commit->peer_pos
+					      : commit->peer_pos - commit->pos;
+}
+
+/*
+ * Which commits kept their order can be read in more than one way when two of
+ * them were swapped: both readings leave as many commits in place, and the
+ * one to report as moved is the one which ended up furthest from where it
+ * was, rather than whichever the search happened to drop.
+ */
+static void
+bdiff_prefer_least_moved(struct bdiff_commit **pairs, size_t pairs_len, bool *kept)
+{
+	size_t i, j;
+
+	for (i = 0; i < pairs_len; i++) {
+		size_t conflicts = 0, conflict = 0;
+
+		if (kept[i])
+			continue;
+
+		/* The commits which kept their order read in increasing
+		 * position; this one can take the place of the only one it
+		 * reads out of order with, if there is just the one. */
+		for (j = 0; j < pairs_len && conflicts < 2; j++) {
+			if (!kept[j])
+				continue;
+			if (j < i ? pairs[j]->peer_pos > pairs[i]->peer_pos
+				  : pairs[j]->peer_pos < pairs[i]->peer_pos) {
+				conflict = j;
+				conflicts++;
+			}
+		}
+
+		if (conflicts == 1 &&
+		    bdiff_displacement(pairs[i]) < bdiff_displacement(pairs[conflict])) {
+			kept[i] = true;
+			kept[conflict] = false;
+		}
+	}
+}
+
 static bool
 bdiff_metadata_differs(struct bdiff_commit *new_commit, struct bdiff_commit *old_commit)
 {
@@ -758,6 +803,7 @@ bdiff_classify(void)
 
 	qsort(pairs, pairs_len, sizeof(*pairs), bdiff_compare_pos);
 	kept = bdiff_find_kept_order(pairs, pairs_len);
+	bdiff_prefer_least_moved(pairs, pairs_len, kept);
 
 	for (i = 0; i < pairs_len; i++) {
 		struct bdiff_commit *new_commit = pairs[i];
