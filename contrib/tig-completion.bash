@@ -91,6 +91,21 @@ __tig_complete_revision_aliases () {
 	done
 }
 
+# Each end of a range names a revision of its own, and tig reads the names
+# there too, as in _up..HEAD or master.._up.  Match against the end being
+# typed, and give the range back whole.
+__tig_complete_revision_aliases_in_range () {
+	local cur_="$cur" pfx=
+
+	case "$cur_" in
+	*..*)	pfx="${cur_%..*}.."
+		cur_="${cur_##*..}"
+		;;
+	esac
+
+	__tig_complete_revision_aliases "$cur_" "$pfx"
+}
+
 __tig_complete_revisions () {
 	local cur_="${1-$cur}" pfx="${2-}"
 	__git_complete_refs --cur="$cur_" --pfx="$pfx"
@@ -202,7 +217,7 @@ __tig_main () {
 
 	# the revisions git just completed can also be spelled tig's way
 	if [ -z "$dashdash" ]; then
-		__tig_complete_revision_aliases
+		__tig_complete_revision_aliases_in_range
 	fi
 }
 
