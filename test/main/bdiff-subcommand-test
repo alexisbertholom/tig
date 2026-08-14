@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# Test that a base diff is refused where there is no main view to mark.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=5
+expected_status_code=1
+
+steps '
+	:save-display tig-did-not-exit-as-expected
+'
+
+setup_branched_repo()
+{
+	git_init .
+
+	git_add a "a"
+	git_commit -m "Master A"
+
+	git checkout -q -b feature
+	git_add f1 "f1"
+	git_commit -m "Feature 1"
+}
+
+in_work_dir setup_branched_repo
+
+test_tig log --bdiff master
+
+assert_equals stderr <<EOF
+tig: Option --bdiff takes no subcommand
+EOF
+
+assert_not_exists 'tig-did-not-exit-as-expected'

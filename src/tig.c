@@ -658,6 +658,12 @@ parse_options(int argc, const char *argv[], bool pager_mode)
 			die("command too long");
 	}
 
+	/* The comparison marks the commits of the main view, which a
+	 * subcommand opens something else than, so asking for both says two
+	 * things at once and only one of them can be honoured. */
+	if (subcommand && opt_bdiff_rev)
+		die("Option --bdiff takes no subcommand");
+
 	if (filter_argv)
 		filter_options(filter_argv, request);
 

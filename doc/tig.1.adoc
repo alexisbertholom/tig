@@ -93,7 +93,9 @@ grep::
 	Compare the history of HEAD with the one of <rev>, commit by commit,
 	starting from their common ancestor. Without <rev>, the upstream of
 	the current branch is used, or the remote branch of the same name
-	when the branch tracks nothing. See the "BASE DIFF" section.
+	when the branch tracks nothing. The comparison marks the commits of
+	the main view, so it takes no subcommand. See the "BASE DIFF"
+	section.
 
 --bdiff-base <rev>::
 	Compare from <rev> instead of the common ancestor of HEAD and the
