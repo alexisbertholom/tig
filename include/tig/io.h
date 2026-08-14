@@ -95,6 +95,7 @@ char * io_strerror(struct io *io);
 bool io_can_read(struct io *io, bool can_block);
 ssize_t io_read(struct io *io, void *buf, size_t bufsize);
 bool io_get(struct io *io, struct buffer *buf, int c, bool can_read);
+bool io_get_buffered(struct io *io, struct buffer *buf, int c, bool allow_read);
 bool io_write(struct io *io, const void *buf, size_t bufsize);
 bool io_printf(struct io *io, const char *fmt, ...) PRINTF_LIKE(2, 3);
 bool io_read_buf(struct io *io, char buf[], size_t bufsize, bool allow_empty);
