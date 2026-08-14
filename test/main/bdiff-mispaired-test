@@ -1,0 +1,85 @@
+#!/bin/sh
+#
+# Test a commit git-range-diff(1) pairs with another one doing something
+# similar, rather than with the commit it was rewritten into.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=10
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+write_lock()
+{
+	{
+		printf 'lock\n  name: %s\n' "$1"
+		i=1
+		while [ "$i" -le 20 ]; do
+			printf '  resolved-%s: registry/pkg/%s\n' "$i" "$i"
+			i=$(expr "$i" + 1)
+		done
+	} > lock.txt
+}
+
+setup_lookalike_repo()
+{
+	rewrite_date="Sat Apr 4 13:29:36 2015 +0200"
+
+	git_init .
+
+	git_add lock.txt "lock"
+	git_commit -m "Initial"
+
+	# Installing a module writes a long, mostly boilerplate block into the
+	# lock file, so two of those commits look much alike.
+	write_lock alpha
+	git add lock.txt
+	git_commit -m "Install the alpha module"
+	installing="$(git rev-parse HEAD)"
+
+	git_add z "z"
+	git_commit -m "Add z"
+
+	git branch old
+
+	# The installing commit is written again with a patch of its own, and
+	# a commit installing another module is written after it.  What the
+	# rewritten commit kept is its message and its author date.
+	git reset -q --hard old~2
+
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$installing" > /dev/null
+	git_add alpha.md "a totally different patch"
+	rm -f lock.txt
+	git add -A
+	GIT_COMMITTER_DATE="$rewrite_date" git commit -q --amend --no-edit
+
+	write_lock beta
+	git add lock.txt
+	git_commit -m "Install the beta module"
+
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick old > /dev/null
+}
+
+in_work_dir setup_lookalike_repo
+
+# The commit installing beta is the one whose patch looks like the one the
+# alpha commit used to have, but the alpha commit is the one which kept its
+# message and its author date: it is the pair to keep.
+test_case lookalike \
+ --args='--bdiff old' <<EOF
+* [master] [same] Add z
+* [add] Install the beta module
+* [change] Install the alpha module
+I Initial
+ 
+ 
+ 
+ 
+[main] 49f39970680f0bab7e5d087d5c6524fcb901c2d6 - commit 1 of 4             100%
+EOF
+
+run_test_cases

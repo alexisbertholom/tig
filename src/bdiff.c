@@ -621,6 +621,56 @@ bdiff_rescue_matches(struct bdiff_commit *new_commit, struct bdiff_commit *old_c
 	return old_commit->message_hash == new_commit->message_hash;
 }
 
+/*
+ * range-diff pairs commits by how alike their patches are, which two commits
+ * doing a similar small thing to the same file can be enough for.  A commit
+ * whose message and author date a rewrite left untouched has a stronger claim
+ * than that: hand it over when the pair range-diff settled on agrees on
+ * neither, and the commit it claims is waiting on nothing else.
+ */
+static void
+bdiff_repair_pairs(void)
+{
+	size_t i, j;
+
+	for (i = 0; i < bdiff.old_side.commits; i++) {
+		struct bdiff_commit *old_commit = bdiff.old_side.commit[i];
+		struct bdiff_commit *paired;
+
+		if (!old_commit->peer)
+			continue;
+
+		paired = string_map_get(&bdiff_commits, old_commit->peer);
+		if (!paired || bdiff_rescue_matches(paired, old_commit, false))
+			continue;
+
+		for (j = 0; j < bdiff.new_side.commits; j++) {
+			struct bdiff_commit *new_commit = bdiff.new_side.commit[j];
+
+			if (new_commit->peer ||
+			    !bdiff_rescue_matches(new_commit, old_commit, false))
+				continue;
+
+			paired->peer = NULL;
+			paired->peer_pos = 0;
+			paired->range_diffed = false;
+			paired->patch_body_differs = false;
+
+			old_commit->peer = new_commit->id;
+			old_commit->peer_pos = new_commit->pos;
+			new_commit->peer = old_commit->id;
+			new_commit->peer_pos = old_commit->pos;
+
+			/* range-diff never compared these two, so nothing says
+			 * their patches are the same. */
+			old_commit->patch_differs = true;
+			new_commit->patch_differs = true;
+			new_commit->range_diffed = false;
+			break;
+		}
+	}
+}
+
 static void
 bdiff_rescue_pairs(void)
 {
@@ -1017,6 +1067,7 @@ bdiff_load(const char *rev, const char *base, const char *onto)
 		code = bdiff_pair_commits(merges);
 		if (code != SUCCESS)
 			return code;
+		bdiff_repair_pairs();
 		bdiff_rescue_pairs();
 	}
 
