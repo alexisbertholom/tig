@@ -2595,7 +2595,12 @@ diff_read(struct view *view, struct buffer *buf, bool force_stop)
 
 		diff_restore_line(view, state);
 
-		if (!state->adding_describe_ref && !ref_list_contains_tag(view->vid)) {
+		/* A diff being abandoned is not worth naming: asking would
+		 * start a command for a commit already scrolled past, and take
+		 * the load being dropped through begin_update(), which waits
+		 * on the pipe it closes rather than killing it. */
+		if (!force_stop && !state->adding_describe_ref &&
+		    !ref_list_contains_tag(view->vid)) {
 			const char *describe_argv[] = { "git", "describe", "--tags", view->vid, NULL };
 			enum status_code code = begin_update(view, NULL, describe_argv, OPEN_EXTRA);
 
