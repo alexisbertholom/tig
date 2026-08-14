@@ -624,7 +624,7 @@ update_view(struct view *view)
 	/* Clear the view and redraw everything since the tree sorting
 	 * might have rearranged things. */
 	bool redraw = view->lines == 0;
-	bool can_read = true;
+	bool allow_read = true;
 	struct encoding *encoding = view->encoding ? view->encoding : default_encoding;
 	struct buffer line;
 
@@ -645,7 +645,12 @@ update_view(struct view *view)
 		return true;
 	}
 
-	for (; io_get(view->pipe, &line, '\n', can_read); can_read = false) {
+	/* One helping of what has arrived, and no waiting on the rest: a child
+	 * which stops mid-line -- git pausing on a cold read is enough -- would
+	 * otherwise hold this loop, and the keyboard behind it, for as long as
+	 * it takes to go on.  What is left of a line stays buffered for the
+	 * next pass, which comes round when there is more to add to it. */
+	for (; io_get_buffered(view->pipe, &line, '\n', allow_read); allow_read = false) {
 		if (encoding && !encoding_convert(encoding, &line))
 			report("Encoding failure");
 

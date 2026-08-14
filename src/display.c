@@ -664,6 +664,8 @@ init_tty(void)
 	die_callback = done_display;
 }
 
+static void init_winch_pipe(void);
+
 void
 init_display(void)
 {
@@ -696,6 +698,8 @@ init_display(void)
 
 	set_terminal_modes();
 	init_colors();
+	/* After curses, so that its own handler is the one chained to. */
+	init_winch_pipe();
 
 	getmaxyx(stdscr, y, x);
 	status_win = newwin(1, x, y - 1, 0);
@@ -776,6 +780,145 @@ get_input_char(void)
 	return getc(opt_tty.file);
 }
 
+/*
+ * Waiting for something to happen.
+ *
+ * The loop below sleeps until one of the descriptors it depends on has
+ * something to say: the terminal, the pipe of every view still loading, and a
+ * pipe of its own which the window-change handler writes to.  Two things
+ * follow from that, and both are load-bearing.
+ *
+ * A descriptor left out of that set is not serviced late, it is not serviced
+ * at all until something else happens to wake the loop -- a view would stop
+ * part way through loading and stay there until a key was pressed.  Anything
+ * which opens a descriptor this loop depends on belongs in input_wait().  The
+ * cap on the sleep is what keeps such an oversight recoverable: half a second
+ * of lateness rather than a stall.
+ *
+ * And there are now two reasons to wake, a descriptor and a deadline, so every
+ * new one has to be put in the right camp.  A window change produces no bytes,
+ * which is what the self-pipe is for; a periodic refresh produces no
+ * descriptor, which is what the deadline is for.  Neither works as the other.
+ */
+
+/* Look in on a loading view at least this often even when its child is saying
+ * nothing: it bounds the cost of a descriptor missing from the set above, and
+ * keeps the "loading 5s" counter of a quiet view moving.  A loading view
+ * therefore costs two wake-ups a second; an idle tig costs none. */
+#define INPUT_LOADING_CAP_MS	500
+
+/* A pipe holds 64KB and a read takes BUFSIZ, so this many drains everything
+ * which can physically be waiting.  Anything beyond it arrived while we were
+ * working, and the descriptor will still be ready when we look again. */
+#define INPUT_DRAIN_READS	8
+
+static int winch_pipe[2] = { -1, -1 };
+static struct sigaction winch_chain;
+
+static void
+winch_handler(int signal)
+{
+	int saved_errno = errno;
+
+	/* curses installed its handler first and resizing depends on it having
+	 t run, so it keeps its turn; this one only wakes the loop. */
+	if (!(winch_chain.sa_flags & SA_SIGINFO) &&
+	    winch_chain.sa_handler != SIG_DFL &&
+	    winch_chain.sa_handler != SIG_IGN &&
+	    winch_chain.sa_handler != NULL)
+		winch_chain.sa_handler(signal);
+
+	if (winch_pipe[1] != -1) {
+		ssize_t written = write(winch_pipe[1], "", 1);
+
+		(void) written;
+	}
+
+	errno = saved_errno;
+}
+
+static void
+init_winch_pipe(void)
+{
+	struct sigaction action;
+	int i;
+
+	if (pipe(winch_pipe) == -1) {
+		winch_pipe[0] = winch_pipe[1] = -1;
+		return;
+	}
+
+	for (i = 0; i < 2; i++) {
+		int flags = fcntl(winch_pipe[i], F_GETFL);
+
+		fcntl(winch_pipe[i], F_SETFD, FD_CLOEXEC);
+		if (flags != -1)
+			fcntl(winch_pipe[i], F_SETFL, flags | O_NONBLOCK);
+	}
+
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = winch_handler;
+	sigemptyset(&action.sa_mask);
+	sigaction(SIGWINCH, &action, &winch_chain);
+}
+
+/*
+ * Sleep until the terminal, a loading view or a window change has something,
+ * or until the deadline falls due.  Says whether the terminal was the one:
+ * bytes went to curses, and if no key comes of them it is part way through an
+ * escape sequence.
+ */
+/* How long curses gives the rest of an escape sequence to turn up. */
+static int
+input_escape_delay(void)
+{
+#ifdef NCURSES_VERSION
+	return ESCDELAY > 0 ? ESCDELAY : 1000;
+#else
+	return 1000;
+#endif
+}
+
+static bool
+input_wait(int timeout_ms)
+{
+	struct timeval tv = { timeout_ms / 1000, (timeout_ms % 1000) * 1000 };
+	struct view *view;
+	fd_set fds;
+	int maxfd;
+	int i;
+
+	FD_ZERO(&fds);
+	FD_SET(opt_tty.fd, &fds);
+	maxfd = opt_tty.fd;
+
+	if (winch_pipe[0] != -1) {
+		FD_SET(winch_pipe[0], &fds);
+		maxfd = MAX(maxfd, winch_pipe[0]);
+	}
+
+	foreach_view (view, i) {
+		if (!view->pipe || view->pipe->pipe == -1)
+			continue;
+		FD_SET(view->pipe->pipe, &fds);
+		maxfd = MAX(maxfd, view->pipe->pipe);
+	}
+
+	/* An interrupted wait is a wait which ended: come round, look at
+	 * everything again, and sleep afresh if there is still nothing. */
+	if (select(maxfd + 1, &fds, NULL, NULL, timeout_ms < 0 ? NULL : &tv) < 0)
+		return false;
+
+	if (winch_pipe[0] != -1 && FD_ISSET(winch_pipe[0], &fds)) {
+		char discard[64];
+
+		while (read(winch_pipe[0], discard, sizeof(discard)) > 0)
+			;
+	}
+
+	return !!FD_ISSET(opt_tty.fd, &fds);
+}
+
 static bool
 update_views(void)
 {
@@ -784,7 +927,16 @@ update_views(void)
 	bool is_loading = false;
 
 	foreach_view (view, i) {
-		update_view(view);
+		int reads = INPUT_DRAIN_READS;
+
+		/* Take everything which has arrived for this view, not just
+		 * the first helping of it, so that how much gets through does
+		 * not ride on how often the loop comes round. */
+		do {
+			update_view(view);
+		} while (--reads > 0 && view->pipe &&
+			 io_can_read(view->pipe, false));
+
 		if (view->pipe ||
 		    (view_is_displayed(view) && view->watch.changed))
 			is_loading = true;
@@ -798,6 +950,7 @@ get_input(int prompt_position, struct key *key)
 {
 	struct view *view;
 	int i, key_value, cursor_y, cursor_x;
+	bool escape_pending = false;
 
 	if (prompt_position > 0)
 		input_mode = true;
@@ -806,6 +959,7 @@ get_input(int prompt_position, struct key *key)
 
 	while (true) {
 		int delay = -1;
+		bool loading;
 
 		if (opt_refresh_mode != REFRESH_MODE_MANUAL) {
 			bool refs_refreshed = false;
@@ -825,8 +979,9 @@ get_input(int prompt_position, struct key *key)
 			}
 		}
 
-		if (update_views())
-			delay = 0;
+		loading = update_views();
+		if (loading && (delay < 0 || delay > INPUT_LOADING_CAP_MS))
+			delay = INPUT_LOADING_CAP_MS;
 
 		/* Update the cursor position. */
 		if (prompt_position) {
@@ -842,15 +997,41 @@ get_input(int prompt_position, struct key *key)
 
 		if (is_script_executing()) {
 			/* Wait for the current command to complete. */
-			if (delay == 0 || !read_script(key))
+			if (loading || !read_script(key))
 				continue;
 			return key->modifiers.multibytes ? OK : key->data.value;
 
 		} else {
 			/* Refresh, accept single keystroke of input */
 			doupdate();
-			wtimeout(status_win, delay);
-			key_value = wgetch(status_win);
+
+			if (escape_pending) {
+				/* Bytes have gone to curses.  If they were the
+				 * start of a sequence, only its own timer can
+				 * decide where the sequence ends -- and it
+				 * only runs that timer while it is the one
+				 * waiting, so it does the waiting here.  A key
+				 * already made of them comes back at once. */
+				wtimeout(status_win, input_escape_delay());
+				key_value = wgetch(status_win);
+				escape_pending = false;
+				if (key_value == ERR)
+					continue;
+
+			} else {
+				/* curses reads the terminal in helpings, so a
+				 * key can be waiting in its queue with nothing
+				 * left on the descriptor to wake us for.  Ask
+				 * it first, and only sleep once it has none. */
+				nodelay(status_win, true);
+				key_value = wgetch(status_win);
+				nodelay(status_win, false);
+
+				if (key_value == ERR) {
+					escape_pending = input_wait(delay);
+					continue;
+				}
+			}
 		}
 
 		/* wgetch() with nodelay() enabled returns ERR when
@@ -906,6 +1087,12 @@ get_input(int prompt_position, struct key *key)
 			key->data.bytes[0] = key_value;
 
 			key_length = utf8_char_length(key->data.bytes);
+			/* The rest of the character is on its way, but say how
+			 * long to wait rather than inheriting whichever mode
+			 * the wait above left behind: a sequence cut short
+			 * would otherwise hold this loop, and every view
+			 * loading behind it, for good. */
+			wtimeout(status_win, input_escape_delay());
 			for (pos = 1; pos < key_length && pos < sizeof(key->data.bytes) - 1; pos++) {
 				key->data.bytes[pos] = wgetch(status_win);
 			}

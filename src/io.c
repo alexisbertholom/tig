@@ -546,8 +546,16 @@ io_memchr(struct buffer *buf, char *data, int c)
 
 DEFINE_ALLOCATOR(io_realloc_buf, char, BUFSIZ)
 
+/*
+ * Hand out the next line, reading at most `reads` times to find one: none at
+ * all to take only what is already buffered, one to take a single helping of
+ * whatever has arrived, or IO_READ_ALL to wait for a whole line however long
+ * it takes to turn up.
+ */
+#define IO_READ_ALL	(-1)
+
 static bool
-io_get_line(struct io *io, struct buffer *buf, int c, size_t *lineno, bool can_read, char eol_char)
+io_get_line(struct io *io, struct buffer *buf, int c, size_t *lineno, int reads, char eol_char)
 {
 	char *eol;
 	ssize_t readsize;
@@ -590,8 +598,10 @@ io_get_line(struct io *io, struct buffer *buf, int c, size_t *lineno, bool can_r
 			return false;
 		}
 
-		if (!can_read)
+		if (!reads)
 			return false;
+		if (reads > 0)
+			reads--;
 
 		if (io->bufsize > 0 && io->bufpos > io->buf)
 			memmove(io->buf, io->bufpos, io->bufsize);
@@ -613,7 +623,18 @@ io_get_line(struct io *io, struct buffer *buf, int c, size_t *lineno, bool can_r
 bool
 io_get(struct io *io, struct buffer *buf, int c, bool can_read)
 {
-	return io_get_line(io, buf, c, NULL, can_read, 0);
+	return io_get_line(io, buf, c, NULL, can_read ? IO_READ_ALL : 0, 0);
+}
+
+/*
+ * The same, for a caller which must not be held up: it takes a single helping
+ * of what has arrived and leaves any part of a line at the end of it buffered
+ * for the next call, rather than waiting on the rest.
+ */
+bool
+io_get_buffered(struct io *io, struct buffer *buf, int c, bool allow_read)
+{
+	return io_get_line(io, buf, c, NULL, allow_read ? 1 : 0, 0);
 }
 
 bool
@@ -698,7 +719,7 @@ io_load_file(struct io *io, const char *separators,
 	struct buffer buf;
 	enum status_code state = SUCCESS;
 
-	while (state == SUCCESS && io_get_line(io, &buf, '\n', lineno, true, '\\')) {
+	while (state == SUCCESS && io_get_line(io, &buf, '\n', lineno, IO_READ_ALL, '\\')) {
 		char *name;
 		char *value;
 		size_t namelen;
