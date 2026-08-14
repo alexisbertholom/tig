@@ -1,0 +1,71 @@
+#!/bin/sh
+
+. libtest.sh
+. libgit.sh
+
+export COLUMNS=50
+
+tigrc <<EOF
+set diff-stat-group = yes
+set line-graphics = utf-8
+EOF
+
+steps '
+	:save-display diff-stat-group-utf8.screen
+'
+
+git_init "$work_dir"
+
+test_setup_work_dir()
+{
+	git config core.quotepath false
+	for path in \
+		src/données/café.ts \
+		src/données/résumé.ts \
+		src/日本語.ts \
+		src/plain.ts
+	do
+		mkdir -p -- "$(dirname -- "$path")"
+		printf 'x\n' > "$path"
+		git add -- "$path"
+	done
+	git_commit -m "Add sources"
+}
+
+test_tig show
+
+# The name column is measured in columns and not in bytes: an accented letter
+# takes two bytes for one column, and an ideograph three bytes for two, so a
+# padding counted in bytes leaves the '|' of those rows off.  The padding is all
+# this asserts on, hence "strict": the default comparison ignores whitespace.
+assert_equals 'diff-stat-group-utf8.screen' strict <<'EOF'
+commit 2c32ee4cfad6177ee1a6c1fb7839efd40b81db30
+Refs: [master]
+Author:     Committer <c.ommitter@example.net>
+AuthorDate: Fri Feb 13 23:31:30 2009 +0000
+Commit:     Committer <c.ommitter@example.net>
+CommitDate: Fri Feb 13 23:31:30 2009 +0000
+ 
+    Add sources
+---
+ src/
+ ├── données/
+ │   ├── café.ts   | 1 +
+ │   └── résumé.ts | 1 +
+ ├── plain.ts      | 1 +
+ └── 日本語.ts     | 1 +
+ 4 files changed, 4 insertions(+)
+ 
+diff --git a/src/données/café.ts b/src/données/caf
+new file mode 100644
+index 0000000..587be6b
+--- /dev/null
++++ b/src/données/café.ts
+@@ -0,0 +1 @@
++x
+diff --git a/src/données/résumé.ts b/src/données/r
+new file mode 100644
+index 0000000..587be6b
+--- /dev/null
+[diff] 2c32ee4cfad6177ee1a6c1fb7839efd40b81db3 62%
+EOF

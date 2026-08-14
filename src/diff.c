@@ -1818,9 +1818,13 @@ struct statgrp_file {
 	const char *rest;	/* "| <graph>" tail, points into text */
 };
 
+/* A path is measured in two ways: in bytes, to size the buffers it is copied
+ * through, and in columns, to lay the rows out.  The two only agree as long as
+ * the path is ASCII. */
 struct statgrp_node {
 	char *name;			/* component, directories keep their '/' */
-	size_t namelen;
+	size_t namelen;			/* its length in bytes */
+	size_t namecols;		/* the columns it is drawn in */
 	int fidx;			/* the entry it stands for, or -1 */
 	struct statgrp_node **kid;
 	size_t kids, kids_alloc;
@@ -1978,6 +1982,7 @@ statgrp_kid(struct statgrp_node *node, const char *name, size_t namelen, int fid
 	memcpy(n->name, name, namelen);
 	n->name[namelen] = 0;
 	n->namelen = namelen;
+	n->namecols = utf8_width(n->name);
 	n->fidx = fidx;
 	node->kid[node->kids++] = n;
 	return n;
@@ -2013,9 +2018,10 @@ statgrp_fold(struct statgrp_node *node, size_t indent, size_t names, size_t widt
 	while (node->fidx < 0 && node->kids == 1) {
 		struct statgrp_node *kid = node->kid[0];
 		size_t len = node->namelen + kid->namelen;
+		size_t cols = node->namecols + kid->namecols;
 		char *name;
 
-		if (indent + len > (kid->fidx >= 0 ? names : width))
+		if (indent + cols > (kid->fidx >= 0 ? names : width))
 			break;
 
 		name = realloc(node->name, len + 1);
@@ -2024,6 +2030,7 @@ statgrp_fold(struct statgrp_node *node, size_t indent, size_t names, size_t widt
 		memcpy(name + node->namelen, kid->name, kid->namelen + 1);
 		node->name = name;
 		node->namelen = len;
+		node->namecols = cols;
 		node->fidx = kid->fidx;
 
 		free(node->kid);
@@ -2042,7 +2049,7 @@ statgrp_fold(struct statgrp_node *node, size_t indent, size_t names, size_t widt
 static size_t
 statgrp_name_width(struct statgrp_node *node, size_t depth)
 {
-	size_t i, max = node->fidx >= 0 ? depth * STATGRP_STEP + node->namelen : 0;
+	size_t i, max = node->fidx >= 0 ? depth * STATGRP_STEP + node->namecols : 0;
 
 	for (i = 0; i < node->kids; i++) {
 		size_t w = statgrp_name_width(node->kid[i], depth + 1);
@@ -2089,7 +2096,7 @@ statgrp_draw_node(struct statgrp_draw *d, struct statgrp_node *node,
 		  size_t depth, bool last)
 {
 	const char *glyph = depth ? d->glyph[last ? STATGRP_LAST : STATGRP_BRANCH] : "";
-	size_t cols = depth * STATGRP_STEP + node->namelen;
+	size_t cols = depth * STATGRP_STEP + node->namecols;
 	size_t saved = d->pfxlen;
 	struct line *row;
 	const char *path = NULL;
@@ -2177,7 +2184,7 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	struct diff_stat_group *g = state->stat_group;
 	struct statgrp_node *root = NULL;
 	struct statgrp_draw draw = { view, state, NULL, statgrp_glyphs() };
-	size_t i, maxrest = 0, maxpath = 0, width, names;
+	size_t i, maxrest = 0, maxrestcols = 0, maxpath = 0, width, names;
 	bool ok = false;
 
 	if (!g || g->files == 0) {
@@ -2193,11 +2200,17 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 	if (!root->name)
 		goto out;
 
+	/* The graph is sized both ways too: in bytes to size the line buffer
+	 * below, and in columns to leave the name what it does not take up. */
 	for (i = 0; i < g->files; i++) {
 		struct statgrp_file *f = &g->file[i];
+		size_t restlen = strlen(f->rest);
+		size_t restcols = utf8_width(f->rest);
 
-		if (strlen(f->rest) > maxrest)
-			maxrest = strlen(f->rest);
+		if (restlen > maxrest)
+			maxrest = restlen;
+		if (restcols > maxrestcols)
+			maxrestcols = restcols;
 		if (f->pathlen > maxpath)
 			maxpath = f->pathlen;
 		if (!statgrp_insert(root, f->path, (int) i))
@@ -2206,7 +2219,7 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 
 	/* What a file row has left for its name once the graph column is in. */
 	width = view->width > 0 ? (size_t) view->width : 80;
-	names = width > maxrest + 2 ? width - maxrest - 2 : 1;
+	names = width > maxrestcols + 2 ? width - maxrestcols - 2 : 1;
 
 	/* The entries git listed at the root head a tree of their own, drawn
 	 * from the first column, so each of them starts the walk over. */
@@ -2222,7 +2235,7 @@ diff_statgrp_flush(struct view *view, struct diff_state *state)
 		draw.names = names;
 
 	/* A row is the lead-in (at most 6 bytes a level, and a level takes at
-	 * least two characters of the path), the name, the padding to the name
+	 * least two bytes of the path), the name, the padding to the name
 	 * column, and the graph. */
 	draw.file = g->file;
 	draw.linecap = draw.names + maxpath * 6 + maxrest + 32;
