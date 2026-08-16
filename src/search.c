@@ -17,6 +17,7 @@
 #include "tig/draw.h"
 #include "tig/main.h"
 #include "tig/graph.h"
+#include "tig/csearch.h"
 
 DEFINE_ALLOCATOR(realloc_unsigned_ints, unsigned int, 32)
 
@@ -256,6 +257,36 @@ search_view(struct view *view, enum request request)
 	} else {
 		report_clear();
 	}
+}
+
+/*
+ * Look for a pattern in what the commits carry, and not only in what the view
+ * shows of them.  The pattern is kept where a plain search would leave it, so
+ * that n goes on from the marked commits to the matches inside them.  An empty
+ * pattern drops the markers and leaves the search term alone.
+ */
+void
+search_content(struct view *view, const char *pattern)
+{
+	enum status_code code;
+
+	if (*pattern)
+		string_ncopy(view->env->search, pattern, strlen(pattern));
+
+	code = csearch_start(pattern);
+	/* The markers are gone or on their way; what is on screen predates
+	 * them either way. */
+	redraw_display(false);
+	report("%s", get_status_message(code));
+}
+
+void
+search_content_view(struct view *view)
+{
+	char *search = read_prompt("&");
+
+	if (search)
+		search_content(view, search);
 }
 
 /* vim: set ts=8 sw=8 noexpandtab: */

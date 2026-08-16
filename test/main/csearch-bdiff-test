@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# Test the content search markers alongside the base diff ones.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=12
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+steps '
+	&needle<Enter>
+	:save-display csearch-bdiff.screen
+'
+
+setup_bdiff_repo()
+{
+	rewrite_date="Sat Apr 4 13:29:36 2015 +0200"
+
+	git_init .
+
+	git_add base "base"
+	git_commit -m "Base"
+
+	git_add b "a needle in the hay"
+	git_commit -m "Kept commit"
+
+	git_add c "c"
+	git_commit -m "Changed commit"
+
+	git_add e "e"
+	git_commit -m "Removed commit about a needle"
+
+	git branch old
+
+	# Rewrite the history the way a rebase would: the changed commit gains
+	# a line, the removed one is dropped and a new one is added on top.
+	git reset -q --hard old~2
+	unset GIT_AUTHOR_DATE
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick old~1 >/dev/null
+	file c "c and a needle"
+	git add c
+	GIT_COMMITTER_DATE="$rewrite_date" git commit -q --amend --no-edit
+
+	git_add f "f"
+	git_commit -m "Added commit"
+}
+
+in_work_dir setup_bdiff_repo
+
+test_tig --bdiff old
+
+# The match marker comes first, and the commits injected from the other
+# revision are marked as well.
+assert_equals 'csearch-bdiff.screen' <<EOF
+* [master] [add] Added commit
+| * [old] [match] [del] Removed commit about a needle
+*-' [match] [change] Changed commit
+* [match] Kept commit
+I Base
+
+
+
+
+
+[main] 6f423e6a762bcaa7b964488bfb56077688e4b866 - commit 1 of 4             100%
+EOF

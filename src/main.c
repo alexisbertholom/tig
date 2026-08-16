@@ -25,6 +25,7 @@
 #include "tig/main.h"
 #include "tig/diff.h"
 #include "tig/search.h"
+#include "tig/csearch.h"
 
 /*
  * Main view backend
@@ -477,6 +478,10 @@ main_get_column_data(struct view *view, const struct line *line, struct view_col
 	column_data->id = commit->id;
 
 	column_data->commit_title = commit->title;
+	if (csearch_matched(commit->id)) {
+		column_data->prefix = CSEARCH_MARKER;
+		column_data->prefix_type = LINE_MAIN_MATCH;
+	}
 	if (commit->bdiff != BDIFF_NONE) {
 		column_data->marker = bdiff_state_label(commit->bdiff);
 		column_data->marker_type = bdiff_state_line_type(commit->bdiff);
@@ -756,6 +761,24 @@ main_request(struct view *view, enum request request, struct line *line)
 	return REQ_NONE;
 }
 
+/*
+ * A content search leaves its pattern where the view search reads it, so that
+ * n steps from one marked commit to the next here, and from any of them to
+ * the matches themselves once its diff is open.  A search of something else
+ * since then only has the columns to go by, as it always had.
+ */
+static bool
+main_grep(struct view *view, struct line *line)
+{
+	struct commit *commit = line->data;
+
+	if (csearch_is_active() && !strcmp(view->env->search, csearch_pattern()) &&
+	    csearch_matched(commit->id))
+		return true;
+
+	return view_column_grep(view, line);
+}
+
 void
 main_select(struct view *view, struct line *line)
 {
@@ -794,7 +817,7 @@ static struct view_ops main_ops = {
 	main_read,
 	view_column_draw,
 	main_request,
-	view_column_grep,
+	main_grep,
 	main_select,
 	main_done,
 	view_column_bit(AUTHOR) | view_column_bit(COMMITTER) | view_column_bit(COMMIT_TITLE) |

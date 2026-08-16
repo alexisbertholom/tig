@@ -985,6 +985,7 @@ Searching
 |search-back             |Search backwards in the view
 |find-next               |Find next search match
 |find-prev               |Find previous search match
+|search-content          |Mark the commits whose contents match
 |=============================================================================
 
 Misc
@@ -1135,6 +1136,7 @@ setting the *default* color option.
 |main-note		|Label of notes.
 |main-prefetch		|Label of reference prefetched by `git maintenance`.
 |main-other		|Label of any other reference.
+|main-match		|Marker of a commit whose contents match the search.
 |=============================================================================
 
 .Base diff colors

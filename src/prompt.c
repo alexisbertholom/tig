@@ -22,6 +22,7 @@
 #include "tig/types.h"
 #include "tig/main.h"
 #include "tig/bdiff.h"
+#include "tig/search.h"
 
 #ifdef HAVE_READLINE
 #include <readline/readline.h>
@@ -981,6 +982,17 @@ run_prompt_command(struct view *view, const char *argv[])
 
 		string_ncopy(view->env->search, search + 1, strlen(search + 1));
 		return cmd[0] == '/' ? REQ_FIND_NEXT : REQ_FIND_PREV;
+
+	} else if (cmdlen > 1 && cmd[0] == '&') {
+		char search[SIZEOF_STR];
+
+		if (!argv_to_string(argv, search, sizeof(search), " ")) {
+			report("Failed to copy search string");
+			return REQ_NONE;
+		}
+
+		search_content(view, search + 1);
+		return REQ_NONE;
 
 	} else if (cmdlen > 1 && cmd[0] == '!') {
 		struct view *next = &pager_view;

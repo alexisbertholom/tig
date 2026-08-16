@@ -190,6 +190,9 @@ struct view_column_data {
 	/* Marker drawn in front of the commit title; used by --bdiff. */
 	const char *marker;
 	enum line_type marker_type;
+	/* Marker drawn in front of that one; used by the content search. */
+	const char *prefix;
+	enum line_type prefix_type;
 	const struct ident *author;
 	const struct ident *committer;
 	const char *commit_title;

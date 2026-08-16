@@ -465,7 +465,8 @@ draw_graph(struct view *view, const struct graph *graph, const struct graph_canv
 static bool
 draw_commit_title(struct view *view, struct view_column *column, enum line_type type,
 		  const struct graph *graph, const struct graph_canvas *graph_canvas,
-		  const struct ref *refs, const char *marker, enum line_type marker_type,
+		  const struct ref *refs, const char *prefix, enum line_type prefix_type,
+		  const char *marker, enum line_type marker_type,
 		  const char *commit_title)
 {
 	if (!column->opt.commit_title.display)
@@ -475,6 +476,9 @@ draw_commit_title(struct view *view, struct view_column *column, enum line_type 
 		return true;
 	if (column->opt.commit_title.refs && refs &&
 	    draw_refs(view, column, refs))
+		return true;
+	if (prefix && (draw_text(view, prefix_type, prefix) ||
+		       draw_text(view, LINE_DEFAULT, " ")))
 		return true;
 	if (marker && (draw_text(view, marker_type, marker) ||
 		       draw_text(view, LINE_DEFAULT, " ")))
@@ -549,6 +553,7 @@ view_column_draw(struct view *view, struct line *line, unsigned int lineno)
 		case VIEW_COLUMN_COMMIT_TITLE:
 			if (draw_commit_title(view, column, line->type == LINE_MAIN_ANNOTATED ? LINE_MAIN_ANNOTATED : LINE_MAIN_COMMIT,
 					      column_data.graph, column_data.graph_canvas, column_data.refs,
+					      column_data.prefix, column_data.prefix_type,
 					      column_data.marker, column_data.marker_type, column_data.commit_title))
 				return true;
 			continue;

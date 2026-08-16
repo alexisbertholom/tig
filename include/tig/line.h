@@ -81,6 +81,7 @@ struct ref;
 	_(MAIN_TRACKED,		""), \
 	_(MAIN_REF,		""), \
 	_(MAIN_HEAD,		""), \
+	_(MAIN_MATCH,		""), \
 	_(STAT_NONE,		""), \
 	_(STAT_STAGED,		""), \
 	_(STAT_UNSTAGED,	""), \

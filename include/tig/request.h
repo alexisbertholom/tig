@@ -77,6 +77,7 @@
 	REQ_(SEARCH_BACK,	"Search backwards in the view"), \
 	REQ_(FIND_NEXT,		"Find next search match"), \
 	REQ_(FIND_PREV,		"Find previous search match"), \
+	REQ_(SEARCH_CONTENT,	"Mark the commits whose contents match"), \
 	\
 	REQ_GROUP("Misc") \
 	REQ_(EDIT,		"Open in editor"), \
