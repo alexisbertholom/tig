@@ -27,6 +27,8 @@ bool csearch_matched(const char *id);
 /* Look for a pattern, dropping what a previous one found; an empty pattern
  * only drops it. */
 enum status_code csearch_start(const char *pattern);
+/* Look again for the pattern in force, keeping what it already found. */
+enum status_code csearch_refresh(void);
 /* Give up on what is left to scan, keeping what was found so far. */
 void csearch_stop(void);
 

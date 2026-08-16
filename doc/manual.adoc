@@ -453,8 +453,9 @@ Searching
 The `&` search asks git for the commits whose patch adds or removes a matching
 line, and for those whose message matches; each of them is prefixed with a blue
 `[match]` in the main view. Only the revisions and paths the view lists are
-looked at, so a filtered view is searched no further than what it shows, and
-commits listed after the search are left unmarked until it is run again.
+looked at, so a filtered view is searched no further than what it shows.
+Refreshing the main view searches again, marking the commits which have turned
+up since without dropping the markers already there.
 
 The pattern is kept as the search regexp too: `n` then steps from one marked
 commit to the next, and, in the diff of any of them, from one match to the

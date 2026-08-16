@@ -275,6 +275,23 @@ csearch_start(const char *pattern)
 	return csearch_next_pass();
 }
 
+/*
+ * A commit carries the pattern or it does not, and neither its ID nor what it
+ * holds can change afterwards: what was found stays true, and only what has
+ * turned up since the search is missing.  Keeping the markers over the scan
+ * spares the view a round of them coming and going for nothing.
+ */
+enum status_code
+csearch_refresh(void)
+{
+	if (!csearch.active)
+		return SUCCESS;
+
+	csearch_stop();
+
+	return csearch_next_pass();
+}
+
 bool
 csearch_update(void)
 {

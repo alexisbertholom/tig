@@ -11,6 +11,7 @@ tigrc <<EOF
 set line-graphics = ascii
 set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
 set diff-view = line-number:no text
+set refresh-mode = after-command
 EOF
 
 steps '
@@ -26,6 +27,9 @@ steps '
 	:find-next
 	:save-display csearch-diff.screen
 	:view-close
+
+	:exec @git commit --allow-empty -m "Late commit about a needle"
+	:save-display csearch-refreshed.screen
 
 	&<Enter>
 	:save-display csearch-cleared.screen
@@ -49,6 +53,10 @@ setup_csearch_repo()
 }
 
 in_work_dir setup_csearch_repo
+
+# The commit made from inside Tig must land on a date of its own.
+export GIT_AUTHOR_DATE="$(expr "$author_date" + "$author_date_delta")"
+export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
 
 test_tig
 
@@ -113,9 +121,26 @@ I Plain commit                          |+++ b/b
 [main] 4474659ff0c422997a028176403b 100%|[diff] Changes to 'b' - line 18 of 100%
 EOF
 
+# A refresh looks again, marking what has turned up since and keeping
+# what was already found.
+assert_equals 'csearch-refreshed.screen' <<EOF
+* [master] [match] Late commit about a needle
+* Another plain commit
+* [match] Commit about a needle
+* [match] Patched commit
+I Plain commit
+ 
+ 
+ 
+ 
+ 
+[main] 556dc5b71be1f809f73f1b4ed800af074ed8181f - commit 3 of 5             100%
+EOF
+
 # An empty pattern drops the markers.
 assert_equals 'csearch-cleared.screen' <<EOF
-* [master] Another plain commit
+* [master] Late commit about a needle
+* Another plain commit
 * Commit about a needle
 * Patched commit
 I Plain commit
@@ -124,6 +149,5 @@ I Plain commit
  
  
  
- 
-[main] 4474659ff0c422997a028176403b07d9278e9989 - commit 3 of 4             100%
+[main] 556dc5b71be1f809f73f1b4ed800af074ed8181f - commit 3 of 5             100%
 EOF
