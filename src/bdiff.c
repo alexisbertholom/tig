@@ -99,6 +99,12 @@ bdiff_base(void)
 }
 
 const char *
+bdiff_old_base(void)
+{
+	return bdiff.old_base;
+}
+
+const char *
 bdiff_state_label(enum bdiff_state state)
 {
 	switch (state) {

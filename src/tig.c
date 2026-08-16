@@ -35,6 +35,7 @@
 #include "tig/prompt.h"
 
 #include "tig/bdiff.h"
+#include "tig/csearch.h"
 
 /* Views. */
 #include "tig/blame.h"
@@ -298,12 +299,20 @@ view_driver(struct view *view, enum request request)
 		find_next(view, request);
 		break;
 
+	case REQ_SEARCH_CONTENT:
+		search_content_view(view);
+		break;
+
 	case REQ_MOVE_NEXT_MERGE:
 	case REQ_MOVE_PREV_MERGE:
 		report("Moving between merge commits is not supported by the %s view", view->name);
 		break;
 
 	case REQ_STOP_LOADING:
+		if (csearch_fd() != -1) {
+			csearch_stop();
+			report("Stopped searching the commit contents");
+		}
 		foreach_view(view, i) {
 			if (view->pipe)
 				report("Stopped loading the %s view", view->name),

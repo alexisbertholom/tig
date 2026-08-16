@@ -299,6 +299,8 @@ bind generic	/	search
 bind generic	?	search-back
 bind generic	n	find-next
 bind generic	N	find-prev
+bind main	&	search-content		# Mark the commits whose contents match
+bind reflog	&	search-content
 # Navigation keys used while searching
 bind search	<Down>	find-next
 bind search	<C-N>	find-next
@@ -455,6 +457,7 @@ color main-replace		cyan	default
 color main-tracked		yellow	default	bold
 color main-ref			cyan	default
 color main-head			cyan	default	bold
+color main-match		blue	default
 color stat-none			default	default
 color stat-staged		magenta	default
 color stat-unstaged		magenta	default

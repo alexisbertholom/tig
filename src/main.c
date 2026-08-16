@@ -25,6 +25,7 @@
 #include "tig/main.h"
 #include "tig/diff.h"
 #include "tig/search.h"
+#include "tig/csearch.h"
 
 /*
  * Main view backend
@@ -361,6 +362,8 @@ main_open(struct view *view, enum open_flags flags)
 	struct main_state *state = view->private;
 	struct view_column *commit_title_column = get_view_column(view, VIEW_COLUMN_COMMIT_TITLE);
 	enum status_code bdiff_code = bdiff_refresh();
+	/* After the base diff, whose other side the search reads. */
+	enum status_code csearch_code = csearch_refresh();
 	enum graph_display graph_display = main_with_graph(view, commit_title_column, flags);
 	/* A fresh open resets "load more"; a reload keeps it so the -n override
 	 * sticks.  view->load_more (not state->) survives because load_view()
@@ -407,10 +410,12 @@ main_open(struct view *view, enum open_flags flags)
 			return code;
 	}
 
-	/* The history moved under a base diff; the commits are still listed,
-	 * only the markers are missing. */
+	/* The history moved under a base diff or a content search; the commits
+	 * are still listed, only the markers are missing. */
 	if (bdiff_code != SUCCESS)
 		report("%s", get_status_message(bdiff_code));
+	else if (csearch_code != SUCCESS)
+		report("%s", get_status_message(csearch_code));
 
 	/* Record the -n limit (if any) so the title can flag a short load and
 	 * REQ_LOAD_MORE knows there is more to load; cleared once loading all. */
@@ -477,6 +482,10 @@ main_get_column_data(struct view *view, const struct line *line, struct view_col
 	column_data->id = commit->id;
 
 	column_data->commit_title = commit->title;
+	if (csearch_matched(commit->id)) {
+		column_data->prefix = CSEARCH_MARKER;
+		column_data->prefix_type = LINE_MAIN_MATCH;
+	}
 	if (commit->bdiff != BDIFF_NONE) {
 		column_data->marker = bdiff_state_label(commit->bdiff);
 		column_data->marker_type = bdiff_state_line_type(commit->bdiff);
@@ -756,6 +765,24 @@ main_request(struct view *view, enum request request, struct line *line)
 	return REQ_NONE;
 }
 
+/*
+ * A content search leaves its pattern where the view search reads it, so that
+ * n steps from one marked commit to the next here, and from any of them to
+ * the matches themselves once its diff is open.  A search of something else
+ * since then only has the columns to go by, as it always had.
+ */
+static bool
+main_grep(struct view *view, struct line *line)
+{
+	struct commit *commit = line->data;
+
+	if (csearch_is_active() && !strcmp(view->env->search, csearch_pattern()) &&
+	    csearch_matched(commit->id))
+		return true;
+
+	return view_column_grep(view, line);
+}
+
 void
 main_select(struct view *view, struct line *line)
 {
@@ -794,7 +821,7 @@ static struct view_ops main_ops = {
 	main_read,
 	view_column_draw,
 	main_request,
-	view_column_grep,
+	main_grep,
 	main_select,
 	main_done,
 	view_column_bit(AUTHOR) | view_column_bit(COMMITTER) | view_column_bit(COMMIT_TITLE) |

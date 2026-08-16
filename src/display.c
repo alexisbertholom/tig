@@ -20,6 +20,8 @@
 #include "tig/draw.h"
 #include "tig/display.h"
 #include "tig/watch.h"
+#include "tig/search.h"
+#include "tig/csearch.h"
 
 #ifdef HAVE_READLINE
 #include <readline/readline.h>
@@ -904,6 +906,13 @@ input_wait(int timeout_ms)
 		maxfd = MAX(maxfd, view->pipe->pipe);
 	}
 
+	/* A content search runs beside the views, with nothing else to wake
+	 * the loop for what it finds. */
+	if (csearch_fd() != -1) {
+		FD_SET(csearch_fd(), &fds);
+		maxfd = MAX(maxfd, csearch_fd());
+	}
+
 	/* An interrupted wait is a wait which ended: come round, look at
 	 * everything again, and sleep afresh if there is still nothing. */
 	if (select(maxfd + 1, &fds, NULL, NULL, timeout_ms < 0 ? NULL : &tv) < 0)
@@ -941,6 +950,19 @@ update_views(void)
 		    (view_is_displayed(view) && view->watch.changed))
 			is_loading = true;
 	}
+
+	/* Newly marked commits are scattered over the whole view, and the
+	 * lines they are on say nothing of having changed: draw them all
+	 * again, and let the view search find its matches anew. */
+	if (csearch_update()) {
+		foreach_displayed_view (view, i) {
+			reset_search(view);
+			redraw_view(view);
+		}
+	}
+
+	if (csearch_fd() != -1)
+		is_loading = true;
 
 	return is_loading;
 }

@@ -1,0 +1,153 @@
+#!/bin/sh
+#
+# Test marking the commits whose contents match a pattern.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=12
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+set diff-view = line-number:no text
+set refresh-mode = after-command
+EOF
+
+steps '
+	&needle<Enter>
+	:save-display csearch-main.screen
+
+	:find-next
+	:save-display csearch-first.screen
+	:find-next
+	:save-display csearch-second.screen
+
+	<Enter>
+	:find-next
+	:save-display csearch-diff.screen
+	:view-close
+
+	:exec @git commit --allow-empty -m "Late commit about a needle"
+	:save-display csearch-refreshed.screen
+
+	&<Enter>
+	:save-display csearch-cleared.screen
+'
+
+setup_csearch_repo()
+{
+	git_init .
+
+	git_add a "hay"
+	git_commit -m "Plain commit"
+
+	git_add b "a needle in the hay"
+	git_commit -m "Patched commit"
+
+	git_add c "hay"
+	git_commit -m "Commit about a needle"
+
+	git_add d "hay"
+	git_commit -m "Another plain commit"
+}
+
+in_work_dir setup_csearch_repo
+
+# The commit made from inside Tig must land on a date of its own.
+export GIT_AUTHOR_DATE="$(expr "$author_date" + "$author_date_delta")"
+export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
+
+test_tig
+
+# Both the commit whose patch carries the pattern and the one whose message
+# does are marked.
+assert_equals 'csearch-main.screen' <<EOF
+* [master] Another plain commit
+* [match] Commit about a needle
+* [match] Patched commit
+I Plain commit
+ 
+ 
+ 
+ 
+ 
+ 
+[main] 6955d4fcb88c0b4b1315748b556a28f51358a1ae - commit 1 of 4             100%
+EOF
+
+# n steps from one marked commit to the next.
+assert_equals 'csearch-first.screen' <<EOF
+* [master] Another plain commit
+* [match] Commit about a needle
+* [match] Patched commit
+I Plain commit
+ 
+ 
+ 
+ 
+ 
+ 
+[main] 556dc5b71be1f809f73f1b4ed800af074ed8181f - commit 2 of 4             100%
+EOF
+
+
+assert_equals 'csearch-second.screen' <<EOF
+* [master] Another plain commit
+* [match] Commit about a needle
+* [match] Patched commit
+I Plain commit
+ 
+ 
+ 
+ 
+ 
+ 
+[main] 4474659ff0c422997a028176403b07d9278e9989 - commit 3 of 4             100%
+EOF
+
+# The pattern doubles as the view search: n goes on to the match itself.
+assert_equals 'csearch-diff.screen' <<EOF
+* [master] Another plain commit         |new file mode 100644
+* [match] Commit about a needle         |index 0000000..7a2788a
+* [match] Patched commit                |--- /dev/null
+I Plain commit                          |+++ b/b
+                                        |@@ -0,0 +1 @@
+                                        |+a needle in the hay
+                                        |\ No newline at end of file
+                                        |
+                                        |
+                                        |
+[main] 4474659ff0c422997a028176403b 100%|[diff] Changes to 'b' - line 18 of 100%
+EOF
+
+# A refresh looks again, marking what has turned up since and keeping
+# what was already found.
+assert_equals 'csearch-refreshed.screen' <<EOF
+* [master] [match] Late commit about a needle
+* Another plain commit
+* [match] Commit about a needle
+* [match] Patched commit
+I Plain commit
+ 
+ 
+ 
+ 
+ 
+[main] 556dc5b71be1f809f73f1b4ed800af074ed8181f - commit 3 of 5             100%
+EOF
+
+# An empty pattern drops the markers.
+assert_equals 'csearch-cleared.screen' <<EOF
+* [master] Late commit about a needle
+* Another plain commit
+* Commit about a needle
+* Patched commit
+I Plain commit
+ 
+ 
+ 
+ 
+ 
+[main] 556dc5b71be1f809f73f1b4ed800af074ed8181f - commit 3 of 5             100%
+EOF

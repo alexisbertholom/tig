@@ -446,7 +446,20 @@ Searching
 |?	|Search backwards in the view. Also prompts for regexp.
 |n	|Find next match for the current search regexp.
 |N	|Find previous match for the current search regexp.
+|&	|Search what the listed commits carry, and not only what the main view
+	 shows of them. Also prompts for regexp.
 |=============================================================================
+
+The `&` search asks git for the commits whose patch adds or removes a matching
+line, and for those whose message matches; each of them is prefixed with a blue
+`[match]` in the main view. Only the revisions and paths the view lists are
+looked at, so a filtered view is searched no further than what it shows.
+Refreshing the main view searches again, marking the commits which have turned
+up since without dropping the markers already there.
+
+The pattern is kept as the search regexp too: `n` then steps from one marked
+commit to the next, and, in the diff of any of them, from one match to the
+next. An empty pattern drops the markers.
 
 The format for patterns is either POSIX.2 ``extended'' REs or PCRE / PCRE2 if
 Tig was compiled with PCRE / PCRE2 support (check with `tig -v`). See the
@@ -505,6 +518,8 @@ Prompt
 			 branch `some/branch`.
 |:bdiff [<rev>]		|Compare the history of HEAD with the one of <rev>,
 			 or with its upstream, the way `--bdiff` does.
+|:&<regexp>		|Mark the commits whose contents match `<regexp>`,
+			 the way `&` does.
 |:save-display <file>	|Save current display to `<file>`.
 |:save-options <file>	|Save current options to `<file>`.
 |:save-view <file>	|Save view info to `<file>` (for testing purposes).

@@ -88,6 +88,7 @@ const char *bdiff_rev_spec(void);
 const char *bdiff_base_spec(void);
 const char *bdiff_onto_spec(void);
 const char *bdiff_base(void);
+const char *bdiff_old_base(void);
 
 #endif
 /* vim: set ts=8 sw=8 noexpandtab: */
