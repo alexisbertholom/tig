@@ -454,8 +454,9 @@ The `&` search looks for the pattern the three ways the diff of a commit shows
 it: in the patch, where git reports the commits adding or removing a matching
 line; in the message; and in the names of the files the commit edits. Each
 commit which carries it is prefixed with a blue `[match]` in the main view.
-Only the revisions and paths the view lists are looked at, so a filtered view
-is searched no further than what it shows.
+The file names can be left out of the search with the 'search-content-paths'
+option. Only the revisions and paths the view lists are looked at, so a
+filtered view is searched no further than what it shows.
 Refreshing the main view searches again, marking the commits which have turned
 up since without dropping the markers already there.
 

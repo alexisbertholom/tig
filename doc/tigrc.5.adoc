@@ -354,6 +354,14 @@ The following variables can be set:
 
 	Wrap around to top/bottom of view when searching. On by default.
 
+'search-content-paths' (bool)::
+
+	Whether the content search bound to '&' also looks for its pattern in
+	the names of the files each commit edits, as the diff of a commit
+	shows them. On by default; with it off, only the patch and the message
+	are searched. Changing it searches again, since it changes which
+	commits match.
+
 'focus-child' (bool)::
 
 	Whether to focus the child view when it is opened. When disabled the

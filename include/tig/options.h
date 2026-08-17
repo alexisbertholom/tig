@@ -75,6 +75,7 @@ typedef struct view_column *view_settings;
 	_(refs_view,			view_settings,		VIEW_NO_FLAGS) \
 	_(rev_args,			const char **,		VIEW_REV_FILTER) \
 	_(rev_filter,			bool,			VIEW_REV_FILTER) \
+	_(search_content_paths,		bool,			VIEW_LOG_LIKE) \
 	_(send_child_enter,		bool,			VIEW_NO_FLAGS) \
 	_(show_changes,			bool,			VIEW_LOG_LIKE) \
 	_(show_notes,			bool,			VIEW_DIFF_LIKE | VIEW_LOG_LIKE) \

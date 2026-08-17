@@ -79,6 +79,10 @@ static struct {
 	bool ignore_case;
 	regex_t regex;		/* The pattern, to try on the paths. */
 	bool has_regex;
+	/* The options the commits found so far were found under; what they
+	 * say changed is no longer what the pattern means. */
+	bool found_ignore_case;
+	bool found_paths;
 	char reading[SIZEOF_REV];	/* Commit whose paths are arriving. */
 	bool read_matched;	/* One of them matched already. */
 	struct io io;
@@ -266,16 +270,22 @@ csearch_next_scan(void)
 	const char *range = "%(revargs)";
 	const struct csearch_scan *scan;
 
-	csearch.scan++;
-	/* The commits a base diff injects are on the other revision, which the
-	 * listed ones leave out; without one there is nothing over there. */
-	if (csearch.scan >= (bdiff_is_active() ? (int) ARRAY_SIZE(csearch_scans)
-						: CSEARCH_OWN_SCANS)) {
-		csearch.scan = CSEARCH_IDLE;
-		return SUCCESS;
+	while (true) {
+		csearch.scan++;
+		/* The commits a base diff injects are on the other revision,
+		 * which the listed ones leave out; without one there is
+		 * nothing over there. */
+		if (csearch.scan >= (bdiff_is_active() ? (int) ARRAY_SIZE(csearch_scans)
+							: CSEARCH_OWN_SCANS)) {
+			csearch.scan = CSEARCH_IDLE;
+			return SUCCESS;
+		}
+
+		scan = &csearch_scans[csearch.scan];
+		if (scan->kind != CSEARCH_PATHS || opt_search_content_paths)
+			break;
 	}
 
-	scan = &csearch_scans[csearch.scan];
 	csearch.reading[0] = 0;
 	csearch.read_matched = false;
 
@@ -327,6 +337,9 @@ csearch_start(const char *pattern)
 		return code;
 	}
 
+	csearch.found_ignore_case = csearch.ignore_case;
+	csearch.found_paths = opt_search_content_paths;
+
 	return csearch_next_scan();
 }
 
@@ -335,6 +348,11 @@ csearch_start(const char *pattern)
  * holds can change afterwards: what was found stays true, and only what has
  * turned up since the search is missing.  Keeping the markers over the scan
  * spares the view a round of them coming and going for nothing.
+ *
+ * What can change is the terms the search was made on -- whether case is
+ * ignored, whether the names of the edited files count -- and a commit found
+ * under the old ones has no claim to a marker under the new: those results go,
+ * and the whole history is looked at again.
  */
 enum status_code
 csearch_refresh(void)
@@ -346,11 +364,16 @@ csearch_refresh(void)
 
 	csearch_stop();
 
-	/* Compiled again: ignoring case is an option, and it may have been
-	 * toggled since. */
 	code = csearch_compile();
 	if (code != SUCCESS)
 		return code;
+
+	if (csearch.ignore_case != csearch.found_ignore_case ||
+	    opt_search_content_paths != csearch.found_paths) {
+		csearch_forget();
+		csearch.found_ignore_case = csearch.ignore_case;
+		csearch.found_paths = opt_search_content_paths;
+	}
 
 	return csearch_next_scan();
 }

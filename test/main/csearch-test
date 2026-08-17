@@ -28,6 +28,11 @@ steps '
 	:save-display csearch-diff.screen
 	:view-close
 
+	:set search-content-paths = no
+	:save-display csearch-no-paths.screen
+	:set search-content-paths = yes
+	:save-display csearch-paths-again.screen
+
 	:exec @git commit --allow-empty -m "Late commit about a needle"
 	:save-display csearch-refreshed.screen
 
@@ -124,6 +129,36 @@ I Plain commit                          |@@ -0,0 +1 @@
                                         |
                                         |
 [main] 3cc5be064176584c94d3bb5adf2e 100%|[diff] Changes to 'b' - line 18 of 100%
+EOF
+
+# The option drops the names of the edited files from the search, and
+# with them the commits which only matched that way.
+assert_equals 'csearch-no-paths.screen' <<EOF
+* [master] Another plain commit
+* [match] Commit about a needle
+* [match] Patched commit
+* Commit adding a file
+I Plain commit
+ 
+ 
+ 
+ 
+ 
+[main] 3cc5be064176584c94d3bb5adf2e25e3b3e696eb - commit 3 of 5             100%
+EOF
+
+assert_equals 'csearch-paths-again.screen' <<EOF
+* [master] Another plain commit
+* [match] Commit about a needle
+* [match] Patched commit
+* [match] Commit adding a file
+I Plain commit
+ 
+ 
+ 
+ 
+ 
+[main] 3cc5be064176584c94d3bb5adf2e25e3b3e696eb - commit 3 of 5             100%
 EOF
 
 # A refresh looks again, marking what has turned up since and keeping
