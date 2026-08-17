@@ -58,14 +58,14 @@ test_tig --bdiff old
 # revision are marked as well.
 assert_equals 'csearch-bdiff.screen' <<EOF
 * [master] [add] Added commit
-| * [old] [match] [del] Removed commit about a needle
-*-' [match] [change] Changed commit
+* [old] [match] [del] Removed commit about a needle
+* [match] [change] Changed commit
 * [match] Kept commit
 I Base
-
-
-
-
-
+ 
+ 
+ 
+ 
+ 
 [main] 6f423e6a762bcaa7b964488bfb56077688e4b866 - commit 1 of 4             100%
 EOF

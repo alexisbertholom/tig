@@ -57,8 +57,8 @@ test_case swapped \
 * [master] [move] Commit third
 * [add] Commit inserted
 * [same] Commit fourth
-| * [from] Commit third
-*-' [same] Commit second
+* [from] Commit third
+* [same] Commit second
 * [same] Commit first
 I Initial
  

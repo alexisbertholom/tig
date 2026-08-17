@@ -57,6 +57,53 @@ main_status_exists(struct view *view, enum line_type type)
 static bool main_add_changes(struct view *view, struct main_state *state, const char *parent);
 static void main_add_bdiff_commits(struct view *view, const char *id);
 
+/*
+ * The commits injected under a parent stand between it and its children, so a
+ * child reaches the first of them instead: they are chained together, and the
+ * last one has the parent they were anchored to, which puts them all on the
+ * lane of the history they were taken out of rather than on one of their own.
+ */
+static const char *
+main_bdiff_graph_parent(const char *parent)
+{
+	struct bdiff_commit *injected = bdiff_is_active() ? bdiff_injected_at(parent) : NULL;
+
+	return injected ? injected->id : parent;
+}
+
+static const char *
+main_bdiff_graph_ids(const char *ids, char *buf, size_t buflen)
+{
+	const char *pos = ids;
+	size_t bufpos = 0;
+	bool injected = false;
+	int field;
+
+	if (!bdiff_is_active())
+		return ids;
+
+	/* The first ID is the commit itself, the ones after it its parents. */
+	for (field = 0; *pos; field++) {
+		char id[SIZEOF_REV] = "";
+		size_t len = strcspn(pos, " ");
+		const char *graph_parent;
+
+		string_ncopy_do(id, sizeof(id), pos, len);
+		graph_parent = field > 0 ? main_bdiff_graph_parent(id) : id;
+		injected |= graph_parent != id;
+
+		if (!string_nformat(buf, buflen, &bufpos, "%s%s",
+				    field > 0 ? " " : "", graph_parent))
+			return ids;
+
+		pos += len;
+		while (*pos == ' ')
+			pos++;
+	}
+
+	return injected ? buf : ids;
+}
+
 static void
 main_register_commit(struct view *view, struct commit *commit, const char *ids, bool is_boundary)
 {
@@ -80,8 +127,13 @@ main_register_commit(struct view *view, struct commit *commit, const char *ids, 
 		main_add_bdiff_commits(view, commit->id);
 	}
 
-	if (state->with_graph)
-		graph->add_commit(graph, &commit->graph, commit->id, ids, is_boundary);
+	if (state->with_graph) {
+		char graph_ids[SIZEOF_STR];
+
+		graph->add_commit(graph, &commit->graph, commit->id,
+				  main_bdiff_graph_ids(ids, graph_ids, sizeof(graph_ids)),
+				  is_boundary);
+	}
 }
 
 static struct commit *
@@ -632,7 +684,8 @@ main_read(struct view *view, struct buffer *buf, bool force_stop)
 
 	case LINE_PARENT:
 		if (state->with_graph)
-			graph->add_parent(graph, line + STRING_SIZE("parent "));
+			graph->add_parent(graph,
+					  main_bdiff_graph_parent(line + STRING_SIZE("parent ")));
 		break;
 
 	case LINE_AUTHOR:

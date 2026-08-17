@@ -82,9 +82,9 @@ test_case context-only \
 * [same] Add c
 * [same] Add b
 * [same] Add a
-| * [from] Edit the other file
-| * [from] Insert a line
-I-' Initial
+* [from] Edit the other file
+* [from] Insert a line
+I Initial
  
 [main] af1bb75d4d509cd54eb254ae987528ae1fe9c453 - commit 1 of 7             100%
 EOF

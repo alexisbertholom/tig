@@ -76,9 +76,9 @@ test_tig --bdiff old
 
 assert_equals 'bdiff-main.screen' <<EOF
 * [master] [add] Added commit
-| * [old] [del] Removed commit
-| * [from] Moved commit
-*-' [change] Changed commit
+* [old] [del] Removed commit
+* [from] Moved commit
+* [change] Changed commit
 * [move] Moved commit
 * Kept commit
 I Base
@@ -96,9 +96,9 @@ EOF
 
 assert_equals 'bdiff-del.screen' <<EOF
 * [master] [add] Added commit           |[del] previous commit 4e9f6b1d68331c9eb
-| * [old] [del] Removed commit          |commit 4e9f6b1d68331c9eb3b3269e0c75893e
-| * [from] Moved commit                 |Refs: [old]
-*-' [change] Changed commit             |Author:     Committer <c.ommitter@examp
+* [old] [del] Removed commit            |commit 4e9f6b1d68331c9eb3b3269e0c75893e
+* [from] Moved commit                   |Refs: [old]
+* [change] Changed commit               |Author:     Committer <c.ommitter@examp
 * [move] Moved commit                   |AuthorDate: Fri Mar 20 01:00:10 2009 +0
 * Kept commit                           |Commit:     Committer <c.ommitter@examp
 I Base                                  |CommitDate: Fri Mar 20 01:00:10 2009 +0
@@ -116,9 +116,9 @@ EOF
 
 assert_equals 'bdiff-change.screen' <<EOF
 * [master] [add] Added commit           |[change] metadata
-| * [old] [del] Removed commit          |-Parents:    35377cf90335d8d9b5a10fa56d
-| * [from] Moved commit                 |+Parents:    2563dc225b06362b3460264b30
-*-' [change] Changed commit             |
+* [old] [del] Removed commit            |-Parents:    35377cf90335d8d9b5a10fa56d
+* [from] Moved commit                   |+Parents:    2563dc225b06362b3460264b30
+* [change] Changed commit               |
 * [move] Moved commit                   |[change] range diff
 * Kept commit                           |    @@ Commit message
 I Base                                  |
@@ -136,9 +136,9 @@ EOF
 
 assert_equals 'bdiff-move.screen' <<EOF
 * [master] [add] Added commit           |[move] metadata
-| * [old] [del] Removed commit          |-Parents:    0378086e895fbc999219b22f45
-| * [from] Moved commit                 |+Parents:    35377cf90335d8d9b5a10fa56d
-*-' [change] Changed commit             |-Position:   2
+* [old] [del] Removed commit            |-Parents:    0378086e895fbc999219b22f45
+* [from] Moved commit                   |+Parents:    35377cf90335d8d9b5a10fa56d
+* [change] Changed commit               |-Position:   2
 * [move] Moved commit                   |+Position:   1
 * Kept commit                           |
 I Base                                  |[move] commit 2563dc225b06362b3460264b3
