@@ -197,6 +197,8 @@ commit of the compared range marked by how it relates to <rev>:
 [from]::
 	Where a reordered commit used to be; mirrors a [move] or
 	[move-change] commit. Like [del], it is inserted into the history.
+	Both ends of a move carry the same number, as in '[move #1]' and
+	'[from #1]', so that they name each other when several commits moved.
 
 [change]::
 	The commit kept its position, but its patch, its message or its

@@ -49,6 +49,7 @@ struct bdiff_commit {
 	struct time author_time;
 	uint64_t message_hash;	/* Hash of the whole commit message. */
 	int pos;		/* 1-based position within its own side. */
+	int move_id;		/* Reading order of the move, for both of its ends. */
 	int peer_pos;		/* Position of the matching commit. */
 	enum bdiff_state state;
 	bool old_side;		/* Belongs to the other revision, not HEAD. */
@@ -73,6 +74,7 @@ bool bdiff_parents_differ(const struct bdiff_commit *new_commit, const struct bd
 struct bdiff_commit *bdiff_injected_at(const char *id);
 
 const char *bdiff_state_label(enum bdiff_state state);
+const char *bdiff_state_marker(enum bdiff_state state, int move_id);
 enum line_type bdiff_state_line_type(enum bdiff_state state);
 bool bdiff_state_shows_new(enum bdiff_state state);
 bool bdiff_state_shows_old(enum bdiff_state state);

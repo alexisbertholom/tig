@@ -126,7 +126,7 @@ diff_bdiff_begin_section(struct view *view, struct diff_state *state,
 			 enum bdiff_section_kind kind, const char *id)
 {
 	struct bdiff_section *section;
-	const char *label = bdiff_state_label(state->bdiff->state);
+	const char *label = bdiff_state_marker(state->bdiff->state, state->bdiff->move_id);
 
 	if (state->bdiff_sections >= BDIFF_SECTIONS)
 		return NULL;

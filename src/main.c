@@ -122,6 +122,7 @@ main_register_commit(struct view *view, struct commit *commit, const char *ids, 
 		const struct bdiff_commit *bdiff = bdiff_lookup(commit->id);
 
 		commit->bdiff = bdiff ? bdiff->state : BDIFF_NONE;
+		commit->bdiff_move_id = bdiff ? bdiff->move_id : 0;
 		/* Commits which are gone from HEAD are displayed right before
 		 * the commit they were following. */
 		main_add_bdiff_commits(view, commit->id);
@@ -299,6 +300,7 @@ main_add_bdiff_commits(struct view *view, const char *id)
 			injected->author ? injected->author : &unknown_ident;
 		commit.author_time = commit.commit_time = injected->author_time;
 		commit.bdiff = injected->state;
+		commit.bdiff_move_id = injected->move_id;
 
 		if (!string_format(ids, "%s %s", injected->id, injected->graph_parent))
 			return;
@@ -539,7 +541,7 @@ main_get_column_data(struct view *view, const struct line *line, struct view_col
 		column_data->prefix_type = LINE_MAIN_MATCH;
 	}
 	if (commit->bdiff != BDIFF_NONE) {
-		column_data->marker = bdiff_state_label(commit->bdiff);
+		column_data->marker = bdiff_state_marker(commit->bdiff, commit->bdiff_move_id);
 		column_data->marker_type = bdiff_state_line_type(commit->bdiff);
 	}
 	if (state->with_graph) {

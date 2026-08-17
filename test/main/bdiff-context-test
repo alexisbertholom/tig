@@ -76,14 +76,14 @@ in_work_dir setup_context_repo
 # used to: the other merely applies to other lines.
 test_case context-only \
  --args='--bdiff old' <<EOF
-* [master] [move-ctx] Insert a line
-* [move-change] Edit the other file
+* [master] [move-ctx #1] Insert a line
+* [move-change #2] Edit the other file
 * [add] Change the context
 * [same] Add c
 * [same] Add b
 * [same] Add a
-* [from] Edit the other file
-* [from] Insert a line
+* [from #2] Edit the other file
+* [from #1] Insert a line
 I Initial
  
 [main] af1bb75d4d509cd54eb254ae987528ae1fe9c453 - commit 1 of 7             100%
@@ -94,11 +94,11 @@ EOF
 test_case metadata \
  --args='--bdiff old' \
  --script='<Enter>' <<EOF
-* [master] [move-ctx] Insert a line
-* [move-change] Edit the other file
+* [master] [move-ctx #1] Insert a line
+* [move-change #2] Edit the other file
 * [add] Change the context
 [main] af1bb75d4d509cd54eb254ae987528ae1fe9c453 - commit 1 of 7              33%
-[move-ctx] metadata
+[move-ctx #1] metadata
 -Parents:    a2dcb3509cf92b59fb19fab1ce598d4841cd2d48
 +Parents:    eac1f891791b771d46bf3b858816210a6f06487d
 -Position:   1

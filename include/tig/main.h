@@ -26,6 +26,7 @@ struct commit {
 	const struct ident *committer;	/* Committer. */
 	struct time commit_time;	/* Date from the committer ident. */
 	enum bdiff_state bdiff;		/* How the commit compares to --bdiff. */
+	int bdiff_move_id;		/* Which move it is an end of, if any. */
 	struct graph_canvas graph;	/* Ancestry chain graphics. */
 	char title[1];			/* First line of the commit message. */
 };

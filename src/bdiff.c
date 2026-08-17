@@ -121,6 +121,27 @@ bdiff_state_label(enum bdiff_state state)
 	}
 }
 
+/*
+ * A commit which moved is read together with the place it comes from, and
+ * there can be several of both: number them so that the two ends of a move
+ * name each other.
+ */
+const char *
+bdiff_state_marker(enum bdiff_state state, int move_id)
+{
+	static char marker[SIZEOF_STR];
+	const char *label = bdiff_state_label(state);
+	size_t len = label ? strlen(label) : 0;
+
+	if (!label || move_id <= 0 || len < 2)
+		return label;
+
+	if (!string_format(marker, "%.*s #%d]", (int) (len - 1), label, move_id))
+		return label;
+
+	return marker;
+}
+
 enum line_type
 bdiff_state_line_type(enum bdiff_state state)
 {
@@ -854,6 +875,7 @@ bdiff_classify(void)
 {
 	struct bdiff_commit **pairs = NULL;
 	size_t pairs_len = 0;
+	int move_id;
 	bool *kept;
 	size_t i;
 
@@ -894,6 +916,21 @@ bdiff_classify(void)
 	for (i = 0; i < bdiff.old_side.commits; i++)
 		if (!bdiff.old_side.commit[i]->peer)
 			bdiff.old_side.commit[i]->state = BDIFF_DEL;
+
+	/* The commits are read from the last one, so that the move read first
+	 * is the one numbered first. */
+	for (i = pairs_len, move_id = 0; i > 0; i--) {
+		struct bdiff_commit *new_commit = pairs[i - 1];
+		struct bdiff_commit *old_commit;
+
+		if (!bdiff_state_moved(new_commit->state))
+			continue;
+
+		old_commit = string_map_get(&bdiff_commits, new_commit->peer);
+		new_commit->move_id = ++move_id;
+		if (old_commit)
+			old_commit->move_id = move_id;
+	}
 
 	free(kept);
 	free(pairs);

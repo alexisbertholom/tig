@@ -1,0 +1,61 @@
+#!/bin/sh
+#
+# Test reading a commit which moved together with the place it comes from.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=12
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+setup_swapped_pairs_repo()
+{
+	rewrite_date="Sat Apr 4 13:29:36 2015 +0200"
+
+	git_init .
+
+	git_add base "base"
+	git_commit -m "Initial"
+
+	for name in a b c d; do
+		git_add "$name" "$name"
+		git_commit -m "Commit $name"
+		eval "commit_$name=$(git rev-parse HEAD)"
+	done
+
+	git branch old
+
+	# Two pairs of commits are swapped, which is two moves to read.
+	# Cherry-picking keeps the author dates, the way a rebase would.
+	git reset -q --hard old~4
+
+	for name in b a d c; do
+		eval "picked=\$commit_$name"
+		GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$picked" > /dev/null
+	done
+}
+
+in_work_dir setup_swapped_pairs_repo
+
+# Each move is numbered, so that the commit which moved and the place it comes
+# from name each other rather than being left to be matched by their subject.
+test_case two-moves \
+ --args='--bdiff old' <<EOF
+* [old] [from #1] Commit d
+* [master] [same] Commit c
+* [move #1] Commit d
+* [from #2] Commit b
+* [same] Commit a
+* [move #2] Commit b
+I Initial
+ 
+ 
+ 
+[main] f8ec9ef9649a9cecec6695df1a21a9d13215254b                             100%
+EOF
+
+run_test_cases

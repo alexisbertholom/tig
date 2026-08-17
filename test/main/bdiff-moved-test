@@ -54,10 +54,10 @@ in_work_dir setup_swapped_repo
 # the third is two, so the third is the one reported as moved.
 test_case swapped \
  --args='--bdiff old' <<EOF
-* [master] [move] Commit third
+* [master] [move #1] Commit third
 * [add] Commit inserted
 * [same] Commit fourth
-* [from] Commit third
+* [from #1] Commit third
 * [same] Commit second
 * [same] Commit first
 I Initial
