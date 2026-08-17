@@ -42,6 +42,11 @@ setup_csearch_repo()
 	git_add a "hay"
 	git_commit -m "Plain commit"
 
+	# Neither its patch nor its message carries the pattern: only the name
+	# of the file it edits does.
+	git_add needle.txt "hay"
+	git_commit -m "Commit adding a file"
+
 	git_add b "a needle in the hay"
 	git_commit -m "Patched commit"
 
@@ -60,20 +65,20 @@ export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
 
 test_tig
 
-# Both the commit whose patch carries the pattern and the one whose message
-# does are marked.
+# The commit whose patch carries the pattern, the one whose message does and
+# the one which only edits a file whose name does are all marked.
 assert_equals 'csearch-main.screen' <<EOF
 * [master] Another plain commit
 * [match] Commit about a needle
 * [match] Patched commit
+* [match] Commit adding a file
 I Plain commit
  
  
  
  
  
- 
-[main] 6955d4fcb88c0b4b1315748b556a28f51358a1ae - commit 1 of 4             100%
+[main] 7a88e75e1f65654cfe8db25b5e9146c985d75e1e - commit 1 of 5             100%
 EOF
 
 # n steps from one marked commit to the next.
@@ -81,14 +86,14 @@ assert_equals 'csearch-first.screen' <<EOF
 * [master] Another plain commit
 * [match] Commit about a needle
 * [match] Patched commit
+* [match] Commit adding a file
 I Plain commit
  
  
  
  
  
- 
-[main] 556dc5b71be1f809f73f1b4ed800af074ed8181f - commit 2 of 4             100%
+[main] e7c459973e27ad5a0d7a116d37bdd3fbc37044f4 - commit 2 of 5             100%
 EOF
 
 
@@ -96,14 +101,14 @@ assert_equals 'csearch-second.screen' <<EOF
 * [master] Another plain commit
 * [match] Commit about a needle
 * [match] Patched commit
+* [match] Commit adding a file
 I Plain commit
  
  
  
  
  
- 
-[main] 4474659ff0c422997a028176403b07d9278e9989 - commit 3 of 4             100%
+[main] 3cc5be064176584c94d3bb5adf2e25e3b3e696eb - commit 3 of 5             100%
 EOF
 
 # The pattern doubles as the view search: n goes on to the match itself.
@@ -111,14 +116,14 @@ assert_equals 'csearch-diff.screen' <<EOF
 * [master] Another plain commit         |new file mode 100644
 * [match] Commit about a needle         |index 0000000..7a2788a
 * [match] Patched commit                |--- /dev/null
-I Plain commit                          |+++ b/b
-                                        |@@ -0,0 +1 @@
+* [match] Commit adding a file          |+++ b/b
+I Plain commit                          |@@ -0,0 +1 @@
                                         |+a needle in the hay
                                         |\ No newline at end of file
                                         |
                                         |
                                         |
-[main] 4474659ff0c422997a028176403b 100%|[diff] Changes to 'b' - line 18 of 100%
+[main] 3cc5be064176584c94d3bb5adf2e 100%|[diff] Changes to 'b' - line 18 of 100%
 EOF
 
 # A refresh looks again, marking what has turned up since and keeping
@@ -128,13 +133,13 @@ assert_equals 'csearch-refreshed.screen' <<EOF
 * Another plain commit
 * [match] Commit about a needle
 * [match] Patched commit
+* [match] Commit adding a file
 I Plain commit
  
  
  
  
- 
-[main] 556dc5b71be1f809f73f1b4ed800af074ed8181f - commit 3 of 5             100%
+[main] e7c459973e27ad5a0d7a116d37bdd3fbc37044f4 - commit 3 of 6             100%
 EOF
 
 # An empty pattern drops the markers.
@@ -143,11 +148,11 @@ assert_equals 'csearch-cleared.screen' <<EOF
 * Another plain commit
 * Commit about a needle
 * Patched commit
+* Commit adding a file
 I Plain commit
  
  
  
  
- 
-[main] 556dc5b71be1f809f73f1b4ed800af074ed8181f - commit 3 of 5             100%
+[main] e7c459973e27ad5a0d7a116d37bdd3fbc37044f4 - commit 3 of 6             100%
 EOF

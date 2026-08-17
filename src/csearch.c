@@ -25,17 +25,21 @@
 /*
  * Content search.
  *
- * Which commits carry the pattern is left to git: -G reports the ones whose
- * patch adds or removes a line matching it, --grep the ones whose message
- * matches.  Given at once the two would narrow each other down, so they are
- * run one after the other and what they report is gathered in the same map.
+ * What a commit carries is looked for the three ways a diff shows it: -G
+ * reports the commits whose patch adds or removes a matching line, --grep
+ * those whose message matches, and --name-only names the files each commit
+ * edits, for the pattern to be tried on.  Given at once the first two would
+ * narrow each other down, so all three run one after the other and what they
+ * report is gathered in the same map.
  *
- * Only commit IDs come down the pipe, which is little enough to read on the
+ * Only IDs and paths come down the pipe, which is little enough to read on the
  * side, while the views the markers belong to are being used.  The regular
- * expression is handed over as it was typed: git matches -G and, told to,
- * --grep the way the view search does, so what marks a commit here is what
- * the search finds once its diff is open.
+ * expression is handed to git as it was typed, and compiled here the way the
+ * view search compiles it, so what marks a commit is what the search finds
+ * once its diff is open.
  */
+
+#define CSEARCH_RECORD	'\001'
 
 struct csearch_commit {
 	char id[SIZEOF_REV];
@@ -43,21 +47,43 @@ struct csearch_commit {
 
 DEFINE_STRING_MAP(csearch_commits, struct csearch_commit *, id, 128)
 
-enum csearch_pass {
-	CSEARCH_IDLE,		/* Nothing is running. */
-	CSEARCH_PATCH,		/* Looking for the pattern in the patches. */
-	CSEARCH_MESSAGE,	/* Looking for it in the messages. */
-	CSEARCH_OLD_PATCH,	/* The same, over the other side of a base diff. */
-	CSEARCH_OLD_MESSAGE,
+enum csearch_kind {
+	CSEARCH_PATCH,		/* Commits whose patch matches. */
+	CSEARCH_MESSAGE,	/* Commits whose message matches. */
+	CSEARCH_PATHS,		/* Commits editing a file whose name matches. */
 };
 
+/* The scans making up a search, in the order they are run; the last three are
+ * only for the other side of a base diff. */
+static const struct csearch_scan {
+	enum csearch_kind kind;
+	bool old_side;
+} csearch_scans[] = {
+	{ CSEARCH_PATCH,	false },
+	{ CSEARCH_MESSAGE,	false },
+	{ CSEARCH_PATHS,	false },
+	{ CSEARCH_PATCH,	true },
+	{ CSEARCH_MESSAGE,	true },
+	{ CSEARCH_PATHS,	true },
+};
+
+#define CSEARCH_OWN_SCANS 3
+#define CSEARCH_IDLE (-1)
+
 static struct {
+	/* First, so that nothing is running before a search is: the rest of
+	 * the state starts zeroed, and zero is a scan. */
+	int scan;		/* Index into csearch_scans, or CSEARCH_IDLE. */
 	char pattern[SIZEOF_STR];
 	bool active;
-	enum csearch_pass pass;
+	bool ignore_case;
+	regex_t regex;		/* The pattern, to try on the paths. */
+	bool has_regex;
+	char reading[SIZEOF_REV];	/* Commit whose paths are arriving. */
+	bool read_matched;	/* One of them matched already. */
 	struct io io;
 	size_t matched;
-} csearch;
+} csearch = { CSEARCH_IDLE };
 
 bool
 csearch_is_active(void)
@@ -80,7 +106,7 @@ csearch_matched(const char *id)
 int
 csearch_fd(void)
 {
-	return csearch.pass == CSEARCH_IDLE ? -1 : csearch.io.pipe;
+	return csearch.scan == CSEARCH_IDLE ? -1 : csearch.io.pipe;
 }
 
 static bool
@@ -101,12 +127,12 @@ csearch_forget(void)
 void
 csearch_stop(void)
 {
-	if (csearch.pass == CSEARCH_IDLE)
+	if (csearch.scan == CSEARCH_IDLE)
 		return;
 
 	io_kill(&csearch.io);
 	io_done(&csearch.io);
-	csearch.pass = CSEARCH_IDLE;
+	csearch.scan = CSEARCH_IDLE;
 }
 
 static bool
@@ -131,17 +157,45 @@ csearch_add(const char *id)
 	return true;
 }
 
-/* Matching without regard to case where the view search would, so that a
- * commit is marked exactly when the search finds something in it. */
+/*
+ * Matching without regard to case where the view search would, so that a
+ * commit is marked exactly when the search finds something in it.  git is
+ * told, and the pattern the paths are tried against is compiled to match.
+ */
+static enum status_code
+csearch_compile(void)
+{
+	int flags = REG_EXTENDED;
+	int err;
+
+	csearch.ignore_case = opt_ignore_case == IGNORE_CASE_YES ||
+			      (opt_ignore_case == IGNORE_CASE_SMART_CASE &&
+			       !utf8_string_contains_uppercase(csearch.pattern));
+	if (csearch.ignore_case)
+		flags |= REG_ICASE;
+
+	if (csearch.has_regex) {
+		regfree(&csearch.regex);
+		csearch.has_regex = false;
+	}
+
+	err = regcomp(&csearch.regex, csearch.pattern, flags);
+	if (err) {
+		char buf[SIZEOF_STR] = "unknown error";
+
+		regerror(err, &csearch.regex, buf, sizeof(buf));
+		regfree(&csearch.regex);
+		return error("Search failed: %s", buf);
+	}
+
+	csearch.has_regex = true;
+	return SUCCESS;
+}
+
 static const char *
 csearch_ignore_case_arg(void)
 {
-	if (opt_ignore_case == IGNORE_CASE_YES ||
-	    (opt_ignore_case == IGNORE_CASE_SMART_CASE &&
-	     !utf8_string_contains_uppercase(csearch.pattern)))
-		return "--regexp-ignore-case";
-
-	return "";
+	return csearch.ignore_case ? "--regexp-ignore-case" : "";
 }
 
 /*
@@ -150,12 +204,17 @@ csearch_ignore_case_arg(void)
  * history would be a scan the view gives no way to read.
  */
 static enum status_code
-csearch_run(const char *pattern_arg, const char *range)
+csearch_run(enum csearch_kind kind, const char *pattern_arg, const char *range)
 {
+	bool by_path = kind == CSEARCH_PATHS;
 	/* --extended-regexp is what -G already is, and what the view search
 	 * is; it is --grep which needs telling. */
 	const char *head_argv[] = {
-		"git", "log", "--no-color", "--format=%H", "--extended-regexp",
+		"git", "log", "--no-color", "--extended-regexp",
+			by_path ? "--format=%x01%H" : "--format=%H",
+			/* A rename told apart hides one of the two names the
+			 * diff shows; both are wanted. */
+			by_path ? "--name-only" : "", by_path ? "--no-renames" : "",
 			csearch_ignore_case_arg(), NULL
 	};
 	const char *tail_argv[] = { range, "--", "%(fileargs)", NULL };
@@ -192,7 +251,7 @@ csearch_run(const char *pattern_arg, const char *range)
 	free(tail);
 
 	if (!ok) {
-		csearch.pass = CSEARCH_IDLE;
+		csearch.scan = CSEARCH_IDLE;
 		return error("Failed to search the commits for '%s'", csearch.pattern);
 	}
 
@@ -200,63 +259,52 @@ csearch_run(const char *pattern_arg, const char *range)
 }
 
 static enum status_code
-csearch_next_pass(void)
+csearch_next_scan(void)
 {
-	char pattern_arg[SIZEOF_STR];
+	char pattern_arg[SIZEOF_STR] = "";
 	char old_range[SIZEOF_STR];
 	const char *range = "%(revargs)";
-	bool in_message;
+	const struct csearch_scan *scan;
 
-	switch (csearch.pass) {
-	case CSEARCH_IDLE:
-		csearch.pass = CSEARCH_PATCH;
-		break;
-
-	case CSEARCH_PATCH:
-		csearch.pass = CSEARCH_MESSAGE;
-		break;
-
-	case CSEARCH_MESSAGE:
-		/* The commits a base diff injects are on the other revision,
-		 * which the listed ones leave out. */
-		if (!bdiff_is_active()) {
-			csearch.pass = CSEARCH_IDLE;
-			return SUCCESS;
-		}
-		csearch.pass = CSEARCH_OLD_PATCH;
-		break;
-
-	case CSEARCH_OLD_PATCH:
-		csearch.pass = CSEARCH_OLD_MESSAGE;
-		break;
-
-	default:
-		csearch.pass = CSEARCH_IDLE;
+	csearch.scan++;
+	/* The commits a base diff injects are on the other revision, which the
+	 * listed ones leave out; without one there is nothing over there. */
+	if (csearch.scan >= (bdiff_is_active() ? (int) ARRAY_SIZE(csearch_scans)
+						: CSEARCH_OWN_SCANS)) {
+		csearch.scan = CSEARCH_IDLE;
 		return SUCCESS;
 	}
 
-	in_message = csearch.pass == CSEARCH_MESSAGE ||
-		     csearch.pass == CSEARCH_OLD_MESSAGE;
+	scan = &csearch_scans[csearch.scan];
+	csearch.reading[0] = 0;
+	csearch.read_matched = false;
 
-	if (!string_format(pattern_arg, in_message ? "--grep=%s" : "-G%s", csearch.pattern)) {
-		csearch.pass = CSEARCH_IDLE;
+	/* Nothing to give git for the paths: it has no way to match a name
+	 * against a regular expression, so it names them and they are tried
+	 * here. */
+	if (scan->kind != CSEARCH_PATHS &&
+	    !string_format(pattern_arg, scan->kind == CSEARCH_MESSAGE
+					? "--grep=%s" : "-G%s", csearch.pattern)) {
+		csearch.scan = CSEARCH_IDLE;
 		return error("The pattern is too long to search for");
 	}
 
-	if (csearch.pass == CSEARCH_OLD_PATCH || csearch.pass == CSEARCH_OLD_MESSAGE) {
+	if (scan->old_side) {
 		if (!string_format(old_range, "%s..%s", bdiff_old_base(), bdiff_rev())) {
-			csearch.pass = CSEARCH_IDLE;
+			csearch.scan = CSEARCH_IDLE;
 			return error("Failed to name the range of %s", bdiff_rev());
 		}
 		range = old_range;
 	}
 
-	return csearch_run(pattern_arg, range);
+	return csearch_run(scan->kind, pattern_arg, range);
 }
 
 enum status_code
 csearch_start(const char *pattern)
 {
+	enum status_code code;
+
 	csearch_stop();
 	csearch_forget();
 
@@ -272,7 +320,14 @@ csearch_start(const char *pattern)
 	string_ncopy(csearch.pattern, pattern, strlen(pattern));
 	csearch.active = true;
 
-	return csearch_next_pass();
+	code = csearch_compile();
+	if (code != SUCCESS) {
+		csearch.active = false;
+		csearch.pattern[0] = 0;
+		return code;
+	}
+
+	return csearch_next_scan();
 }
 
 /*
@@ -284,28 +339,63 @@ csearch_start(const char *pattern)
 enum status_code
 csearch_refresh(void)
 {
+	enum status_code code;
+
 	if (!csearch.active)
 		return SUCCESS;
 
 	csearch_stop();
 
-	return csearch_next_pass();
+	/* Compiled again: ignoring case is an option, and it may have been
+	 * toggled since. */
+	code = csearch_compile();
+	if (code != SUCCESS)
+		return code;
+
+	return csearch_next_scan();
+}
+
+/*
+ * A commit and the names of the files it edits: the ID arrives on a record
+ * line of its own, the names follow it one per line, and the first of them to
+ * match is enough to mark the commit and to leave the rest unread.
+ */
+static bool
+csearch_read_path(const char *line)
+{
+	if (*line == CSEARCH_RECORD) {
+		string_copy_rev(csearch.reading, line + 1);
+		csearch.read_matched = false;
+		return false;
+	}
+
+	if (!*line || csearch.read_matched || !*csearch.reading)
+		return false;
+
+	if (regexec(&csearch.regex, line, 0, NULL, 0))
+		return false;
+
+	csearch.read_matched = true;
+	return csearch_add(csearch.reading);
 }
 
 bool
 csearch_update(void)
 {
+	bool by_path;
 	bool allow_read = true;
 	bool changed = false;
 	struct buffer buf;
 
-	if (csearch.pass == CSEARCH_IDLE || !io_can_read(&csearch.io, false))
+	if (csearch.scan == CSEARCH_IDLE || !io_can_read(&csearch.io, false))
 		return false;
+
+	by_path = csearch_scans[csearch.scan].kind == CSEARCH_PATHS;
 
 	/* One helping of what has arrived, as the view loading does: a scan
 	 * which stops mid-line must not hold the keyboard behind it. */
 	for (; io_get_buffered(&csearch.io, &buf, '\n', allow_read); allow_read = false)
-		if (csearch_add(buf.data))
+		if (by_path ? csearch_read_path(buf.data) : csearch_add(buf.data))
 			changed = true;
 
 	if (io_error(&csearch.io)) {
@@ -318,11 +408,11 @@ csearch_update(void)
 		enum status_code code;
 
 		io_done(&csearch.io);
-		code = csearch_next_pass();
+		code = csearch_next_scan();
 
 		if (code != SUCCESS)
 			report("%s", get_status_message(code));
-		else if (csearch.pass == CSEARCH_IDLE)
+		else if (csearch.scan == CSEARCH_IDLE)
 			report("%zu commit%s matching '%s'", csearch.matched,
 			       csearch.matched == 1 ? "" : "s", csearch.pattern);
 		changed = true;
