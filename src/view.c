@@ -1204,11 +1204,17 @@ view_column_grep(struct view *view, struct line *line)
 			return true;
 
 		if (column->type == VIEW_COLUMN_COMMIT_TITLE) {
-			const char *marker[] = { column_data.marker, NULL };
+			/* The markers are drawn in front of the title, so
+			 * they are read as part of the line and searched as
+			 * such.  An absent one is empty rather than NULL,
+			 * which would end the list before the other. */
+			const char *markers[] = {
+				column_data.prefix ? column_data.prefix : "",
+				column_data.marker ? column_data.marker : "",
+				NULL
+			};
 
-			/* The marker is drawn in front of the title, so it is
-			 * read as part of the line and searched as such. */
-			if (column_data.marker && grep_text(view, marker))
+			if (grep_text(view, markers))
 				return true;
 
 			if (column->opt.commit_title.refs &&
