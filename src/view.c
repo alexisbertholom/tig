@@ -1190,10 +1190,18 @@ view_column_grep(struct view *view, struct line *line)
 		if (grep_text(view, text))
 			return true;
 
-		if (column->type == VIEW_COLUMN_COMMIT_TITLE &&
-		    column->opt.commit_title.refs &&
-		    grep_refs(view, column, column_data.refs))
-			return true;
+		if (column->type == VIEW_COLUMN_COMMIT_TITLE) {
+			const char *marker[] = { column_data.marker, NULL };
+
+			/* The marker is drawn in front of the title, so it is
+			 * read as part of the line and searched as such. */
+			if (column_data.marker && grep_text(view, marker))
+				return true;
+
+			if (column->opt.commit_title.refs &&
+			    grep_refs(view, column, column_data.refs))
+				return true;
+		}
 	}
 
 	return false;

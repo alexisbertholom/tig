@@ -58,4 +58,42 @@ I Initial
 [main] f8ec9ef9649a9cecec6695df1a21a9d13215254b                             100%
 EOF
 
+# The marker is read as part of the line, so a move can be looked up by its
+# number: the first match is where the commit comes from, the next is the
+# commit itself.
+test_case search-the-move \
+ --args='--bdiff old' \
+ --script='/#2<Enter>' <<EOF
+* [old] [from #1] Commit d
+* [master] [same] Commit c
+* [move #1] Commit d
+* [from #2] Commit b
+* [same] Commit a
+* [move #2] Commit b
+I Initial
+ 
+ 
+ 
+[main] 480758f5648a166fe9ce32c1385fe9b096ce450f                             100%
+EOF
+
+test_case search-the-move-again \
+ --args='--bdiff old' \
+ --script='
+	/#2<Enter>
+	:find-next
+' <<EOF
+* [old] [from #1] Commit d
+* [master] [same] Commit c
+* [move #1] Commit d
+* [from #2] Commit b
+* [same] Commit a
+* [move #2] Commit b
+I Initial
+ 
+ 
+ 
+[main] 1010840b980c0e9a20a7c2d2b313cf3bb82837ec - commit 4 of 5             100%
+EOF
+
 run_test_cases
