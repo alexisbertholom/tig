@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+# Test that searching the ID column only matches what it shows of a hash.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=8
+
+tigrc <<EOF2
+set line-graphics = ascii
+set main-view = id:yes date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF2
+
+# Commit 4 is 51b758035f2bbd1cab731e1d34d8fc8eea375d47, shown as 51b7580; the
+# piece searched for below is in the hash and in no ID the view draws.
+steps '
+	/35f2<Enter>
+	:save-display search-id-hidden.screen
+
+	/51b7580<Enter>
+	:save-display search-id-shown.screen
+'
+
+git_clone 'repo-one'
+
+test_tig
+
+# The piece is in the hash but not in the seven characters drawn of it: the
+# cursor stays where it was.
+assert_equals 'search-id-hidden.screen' <<EOF
+5cb3412 * [master] {origin/master} {origin/HEAD} Commit 10 E
+2843bfd * Commit 10 D
+8d53d6a * Commit 10 C
+51b7580 * Commit 10 B
+19455fa * Commit 10 A
+276c3a4 * Commit 9 E
+[main] 5cb3412a5e06e506840495b91acc885037a48b72 - commit 1 of 50             12%
+EOF
+
+# What is drawn is found.
+assert_equals 'search-id-shown.screen' <<EOF
+5cb3412 * [master] {origin/master} {origin/HEAD} Commit 10 E
+2843bfd * Commit 10 D
+8d53d6a * Commit 10 C
+51b7580 * Commit 10 B
+19455fa * Commit 10 A
+276c3a4 * Commit 9 E
+[main] 51b758035f2bbd1cab731e1d34d8fc8eea375d47 - commit 4 of 50             12%
+EOF

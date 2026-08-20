@@ -1182,10 +1182,23 @@ view_column_grep(struct view *view, struct line *line)
 	}
 
 	for (column = view->columns; column; column = column->next) {
+		char drawn[SIZEOF_STR];
 		const char *text[] = {
 			view_column_text(view, &column_data, column),
 			NULL
 		};
+
+		if (column->hidden)
+			continue;
+
+		/* An ID is drawn as the first characters of itself, and the
+		 * rest of the hash is nowhere on screen: searched whole, it
+		 * answers for matches nobody can see. */
+		if (column->type == VIEW_COLUMN_ID &&
+		    strlen(text[0]) > (size_t) column->width) {
+			string_ncopy(drawn, text[0], (size_t) column->width);
+			text[0] = drawn;
+		}
 
 		if (grep_text(view, text))
 			return true;
