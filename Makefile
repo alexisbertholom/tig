@@ -371,6 +371,7 @@ TIG_OBJS = \
 	src/refs.o \
 	src/status.o \
 	src/stage.o \
+	src/patch.o \
 	src/main.o \
 	src/bdiff.o \
 	src/csearch.o \
