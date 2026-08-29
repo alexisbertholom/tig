@@ -1,0 +1,73 @@
+#!/bin/sh
+
+. libtest.sh
+. libgit.sh
+
+export LINES=16
+export COLUMNS=60
+
+steps '
+	:20
+	U
+	y
+	:view-status
+	:save-display reverted-status.screen
+	:view-close
+	u
+	:view-status
+	:save-display reapplied-status.screen
+'
+
+git_init "$work_dir"
+
+test_setup_work_dir()
+{
+	printf 'a\nb\nc\n' > file
+	git add file
+	git_commit -m "Add file"
+	printf 'a\nB\nc\n' > file
+	git add file
+	git_commit -m "Change the middle line"
+}
+
+test_tig show
+
+assert_equals 'reverted-status.screen' <<EOF
+On branch master
+Changes to be committed:
+  (no files)
+Changes not staged for commit:
+M file
+Untracked files:
+  (no files)
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+[status] Nothing to update                              100%
+EOF
+
+assert_equals 'reapplied-status.screen' <<EOF
+On branch master
+Changes to be committed:
+  (no files)
+Changes not staged for commit:
+  (no files)
+Untracked files:
+  (no files)
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+[status] Nothing to update                              100%
+EOF
+
+in_work_dir git status --short > worktree-status
+assert_equals 'worktree-status' <<EOF
+EOF

@@ -22,6 +22,8 @@
 #include "tig/draw.h"
 #include "tig/apps.h"
 #include "tig/tree.h"
+#include "tig/patch.h"
+#include "tig/prompt.h"
 
 static bool diff_highlight_is_internal(void);
 
@@ -2860,6 +2862,66 @@ diff_common_edit(struct view *view, enum request request, struct line *line)
 	return REQ_NONE;
 }
 
+/*
+ * Make what the chunk under the cursor shows, or take it back, in the working
+ * tree.  What the view shows is a diff of its own, not of the tree, so the
+ * files change under it and there is nothing to reload.
+ */
+static bool
+diff_update_chunk(struct view *view, struct line *line, bool revert)
+{
+	struct diff_state *state = view->private;
+	struct patch_target target = { .reverse = revert, .cached = false };
+	const char *action = revert ? "revert" : "apply";
+	struct line *chunk, *header;
+
+	if (state->bdiff) {
+		report("Cannot %s a chunk of a base diff", action);
+		return false;
+	}
+
+	if (opt_word_diff) {
+		report("Cannot %s a chunk shown as a word diff", action);
+		return false;
+	}
+
+	/* The stored lines lack the column telling what each one does. */
+	if (!opt_diff_indicator) {
+		report("Cannot %s a chunk with 'diff-indicator' unset", action);
+		return false;
+	}
+
+	chunk = find_prev_line_by_type(view, line, LINE_DIFF_CHUNK);
+	header = find_prev_line_by_type(view, line, LINE_DIFF_HEADER);
+	if (!chunk || (header && header > chunk)) {
+		report("Nothing to %s here; put the cursor in a diff chunk", action);
+		return false;
+	}
+
+	if (chunk_header_marker_length(box_text(chunk)) > 2) {
+		report("Cannot %s a chunk of a combined diff", action);
+		return false;
+	}
+
+	if (patch_chunk_is_wrapped(view, patch_chunk_end(view, chunk))) {
+		report("Cannot %s a chunk drawn on wrapped lines", action);
+		return false;
+	}
+
+	if (revert && !prompt_yesno("Are you sure you want to revert the chunk?"))
+		return false;
+
+	if (!patch_apply_chunk(view, chunk, NULL, target, PATCH_CHUNK)) {
+		report("Failed to %s chunk", action);
+		return false;
+	}
+
+	watch_apply(&view->watch, WATCH_INDEX);
+	report("Chunk %s the working tree", revert ? "reverted from" : "applied to");
+
+	return true;
+}
+
 static enum request
 diff_request(struct view *view, enum request request, struct line *line)
 {
@@ -2885,6 +2947,11 @@ diff_request(struct view *view, enum request request, struct line *line)
 
 	case REQ_ENTER:
 		return diff_common_enter(view, request, line);
+
+	case REQ_DIFF_APPLY_CHUNK:
+	case REQ_DIFF_REVERT_CHUNK:
+		diff_update_chunk(view, line, request == REQ_DIFF_REVERT_CHUNK);
+		return REQ_NONE;
 
 	case REQ_REFRESH:
 		reload_view(view);

@@ -951,6 +951,8 @@ View-specific actions
 |stage-update-line       |Stage/unstage single line
 |stage-update-part       |Stage/unstage part of a chunk
 |stage-split-chunk       |Split current diff chunk
+|diff-apply-chunk        |Apply the diff chunk to the working tree
+|diff-revert-chunk       |Revert the diff chunk from the working tree
 |=============================================================================
 
 Cursor navigation
