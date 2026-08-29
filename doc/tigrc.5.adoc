@@ -932,9 +932,11 @@ View manipulation
 |parent                  |Move to parent
 |view-next               |Move focus to the next view
 |refresh                 |Reload and refresh view
+|load-more               |Load all commits past the -n limit
 |maximize                |Maximize the current view
 |view-close              |Close the current view
 |view-close-no-quit      |Close the current view without quitting
+|view-close-force        |Close the current view without first restoring the split
 |quit                    |Close all views and quit
 |=============================================================================
 
@@ -1002,7 +1004,7 @@ Misc
 [frame="none",grid="none",cols="25<m,75<"]
 |=============================================================================
 |edit                    |Open in editor
-|edit-blob               |Open the file as of the shown or blamed commit in editor
+|edit-blob               |Open the file of the shown commit in editor
 |prompt                  |Open the prompt
 |options                 |Open the options menu
 |screen-redraw           |Redraw the screen
