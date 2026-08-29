@@ -48,6 +48,8 @@
 	REQ_(STAGE_UPDATE_LINE,	"Stage/unstage single line"), \
 	REQ_(STAGE_UPDATE_PART, "Stage/unstage part of a chunk"), \
 	REQ_(STAGE_SPLIT_CHUNK,	"Split current diff chunk"), \
+	REQ_(DIFF_APPLY_CHUNK,	"Apply the diff chunk to the working tree"), \
+	REQ_(DIFF_REVERT_CHUNK,	"Revert the diff chunk from the working tree"), \
 	\
 	REQ_GROUP("Cursor navigation") \
 	REQ_(MOVE_UP,		"Move cursor one line up"), \

@@ -91,6 +91,9 @@ Internal commands:
 External commands:
                            C ?git cherry-pick %(commit)
 [-] diff bindings
+View-specific actions
+                           u diff-apply-chunk           Apply the diff chunk to the working tree
+                           U diff-revert-chunk          Revert the diff chunk from the working tree
 Option toggling:
                            [ :toggle diff-context -1
                            ] :toggle diff-context +1
@@ -153,7 +156,4 @@ Toggle keys (enter: o <key>):
                            % file-filter                Toggle file filtering
                            ^ rev-filter                 Toggle revision filtering
                            $ commit-title-overflow      Toggle commit title overflow display
-                           d status-show-untracked-dirs Toggle untracked directory info
-                           | vertical-split             Toggle view split
- 
-[help] - line 2 of 157                                                                          100%
+[help] - line 2 of 160                                                                           98%

@@ -259,6 +259,8 @@ bind stage	\	stage-split-chunk	# Split current diff (c)hunk
 bind stage	@	:/^@@			# Jump to next (c)hunk
 bind stage	[	:toggle diff-context -1	# Decrease the diff context
 bind stage	]	:toggle diff-context +1	# Increase the diff context
+bind diff	u	diff-apply-chunk	# Apply the current diff (c)hunk to the working tree
+bind diff	U	diff-revert-chunk	# Revert the current diff (c)hunk from the working tree
 bind diff	@	:/^@@			# Jump to next (c)hunk
 bind diff	[	:toggle diff-context -1	# Decrease the diff context
 bind diff	]	:toggle diff-context +1	# Increase the diff context
