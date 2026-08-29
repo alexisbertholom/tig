@@ -1,0 +1,100 @@
+#!/bin/sh
+#
+# Test the merge commits of a rewritten history, which git-range-diff(1)
+# compares by a patch that is empty whenever the merge was clean.
+
+. libtest.sh
+. libgit.sh
+
+export LINES=14
+
+tigrc <<EOF
+set line-graphics = ascii
+set main-view = id:no date:no author:no commit-title:yes,graph,refs,overflow=no
+EOF
+
+merge_branch()
+{
+	GIT_AUTHOR_DATE="$merge_date" GIT_COMMITTER_DATE="$merge_date" \
+		git merge -q --no-ff "$1" -m "$2"
+}
+
+setup_merged_repo()
+{
+	merge_date="Sat Apr 4 13:29:36 2015 +0200"
+	rewrite_date="Sun Apr 5 09:00:00 2015 +0200"
+
+	git_init .
+
+	git_add base "base"
+	git_commit -m "Initial"
+	initial="$(git rev-parse HEAD)"
+
+	git_add m "m"
+	git_commit -m "Work on master"
+	work_master="$(git rev-parse HEAD)"
+
+	git checkout -q -b branch-one
+	git_add one "one"
+	git_commit -m "Work on one"
+	work_one="$(git rev-parse HEAD)"
+
+	git checkout -q master
+	merge_branch branch-one "Merge branch 'branch-one' into master"
+
+	git checkout -q -b branch-two
+	git_add two "two"
+	git_commit -m "Work on two"
+	work_two="$(git rev-parse HEAD)"
+
+	git checkout -q master
+	merge_branch branch-two "Merge branch 'branch-two' into master"
+
+	git branch old
+
+	# The whole branch is written again: the commit it starts from is
+	# edited, so every commit after it is another commit, the merges are
+	# renamed, and the second branch gains a commit before being merged,
+	# which leaves that merge another commit to bring in.
+	git checkout -q -B master "$initial"
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$work_master" > /dev/null
+	file m "m and more"
+	git add m
+	GIT_COMMITTER_DATE="$rewrite_date" git commit -q --amend --no-edit
+
+	git checkout -q -B rebuilt-one master
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$work_one" > /dev/null
+	git checkout -q master
+	merge_branch rebuilt-one "Merge branch 'branch-one'"
+
+	git checkout -q -B rebuilt-two master
+	GIT_COMMITTER_DATE="$rewrite_date" git cherry-pick "$work_two" > /dev/null
+	git_add two-more "two more"
+	git_commit -m "More work on two"
+	git checkout -q master
+	merge_branch rebuilt-two "Merge branch 'branch-two'"
+}
+
+in_work_dir setup_merged_repo
+
+# Renaming a merge leaves nothing of it to compare: its message is what
+# changed and the patch of a clean merge is empty.  What tells it apart is the
+# commit it was made on, even when the branch it brings in was rewritten.
+test_case renamed-merges \
+ --args='--bdiff old' <<EOF
+M-. [master] [change] Merge branch 'branch-two'
+| * [rebuilt-two] [add] More work on two
+| * [same] Work on two
+M-| [change] Merge branch 'branch-one'
+| * [rebuilt-one] [same] Work on one
+*-' [change] Work on master
+I Initial
+ 
+ 
+ 
+ 
+ 
+[main] 71592109ed44f399c47b27b12f076c5685923961 - commit 1 of 7             100%
+EOF
+
+run_test_cases

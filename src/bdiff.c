@@ -630,10 +630,69 @@ bdiff_pair_commits(bool with_merges)
  * and the commit message, first as a whole and then down to its subject,
  * which two unrelated commits will not share.
  */
+static size_t
+bdiff_parent_count(const struct bdiff_commit *commit)
+{
+	const char *parents = commit->parents;
+	char id[SIZEOF_REV];
+	size_t count = 0;
+
+	while ((parents = bdiff_next_parent(parents, id)))
+		count++;
+
+	return count;
+}
+
+/*
+ * What a merge commit does is bring a branch onto another, and where it did
+ * so tells it apart better than anything else about it: its message is free
+ * to be reworded, and the patch it is compared by is empty whenever the merge
+ * went through without a conflict to resolve.  The branch it brings in is not
+ * part of that: rewriting it is what the merge is being read for, and it can
+ * have gained or lost commits, which leaves its tip another commit.
+ */
+static bool
+bdiff_merged_onto_the_same(struct bdiff_commit *new_commit, struct bdiff_commit *old_commit)
+{
+	char new_first[SIZEOF_REV] = "";
+	char old_first[SIZEOF_REV] = "";
+	const struct bdiff_commit *parent;
+
+	if (!new_commit->merge || !old_commit->merge)
+		return false;
+	if (bdiff_parent_count(new_commit) != bdiff_parent_count(old_commit))
+		return false;
+
+	bdiff_next_parent(new_commit->parents, new_first);
+	bdiff_next_parent(old_commit->parents, old_first);
+
+	parent = bdiff_lookup(old_first);
+	if (parent && parent->peer)
+		string_copy_rev(old_first, parent->peer);
+
+	return !strcmp(new_first, old_first);
+}
+
+/* What the leftovers are paired on, from what a rewrite is least free to
+ * change to what it is most free to change. */
+enum bdiff_rescue_pass {
+	BDIFF_RESCUE_MESSAGE,
+	BDIFF_RESCUE_SUBJECT,
+	BDIFF_RESCUE_MERGE,
+	BDIFF_RESCUE_PASSES
+};
+
 static bool
 bdiff_rescue_matches(struct bdiff_commit *new_commit, struct bdiff_commit *old_commit,
-		     bool subject_only)
+		     enum bdiff_rescue_pass pass)
 {
+	/* What a merge commit does is bring commits together, and those tell
+	 * it apart better than anything else about it: its message is free to
+	 * be reworded, and the patch it is compared by is empty whenever the
+	 * merge went through without a conflict to resolve. */
+	if (pass == BDIFF_RESCUE_MERGE)
+		return bdiff_merged_onto_the_same(new_commit, old_commit);
+
 	/* The author date is kept by a rewrite, but says little on its own:
 	 * commits written in one go share it. */
 	if (old_commit->author_time.sec != new_commit->author_time.sec)
@@ -641,7 +700,7 @@ bdiff_rescue_matches(struct bdiff_commit *new_commit, struct bdiff_commit *old_c
 
 	/* Rewriting a commit often reworks the body of its message, to
 	 * describe what the commit became; the subject is what stays. */
-	if (subject_only)
+	if (pass == BDIFF_RESCUE_SUBJECT)
 		return *new_commit->subject &&
 		       !strcmp(old_commit->subject, new_commit->subject);
 
@@ -668,14 +727,14 @@ bdiff_repair_pairs(void)
 			continue;
 
 		paired = string_map_get(&bdiff_commits, old_commit->peer);
-		if (!paired || bdiff_rescue_matches(paired, old_commit, false))
+		if (!paired || bdiff_rescue_matches(paired, old_commit, BDIFF_RESCUE_MESSAGE))
 			continue;
 
 		for (j = 0; j < bdiff.new_side.commits; j++) {
 			struct bdiff_commit *new_commit = bdiff.new_side.commit[j];
 
 			if (new_commit->peer ||
-			    !bdiff_rescue_matches(new_commit, old_commit, false))
+			    !bdiff_rescue_matches(new_commit, old_commit, BDIFF_RESCUE_MESSAGE))
 				continue;
 
 			paired->peer = NULL;
@@ -701,35 +760,61 @@ bdiff_repair_pairs(void)
 static void
 bdiff_rescue_pairs(void)
 {
-	size_t i, j;
-	int pass;
+	struct bdiff_commit *match;
+	size_t i, j, matches;
+	enum bdiff_rescue_pass pass;
 
 	/* The whole message tells two commits apart better than its subject
 	 * alone, so pair on it first: a looser match must not take a commit
 	 * an exact one was waiting for. */
-	for (pass = 0; pass < 2; pass++) {
+	for (pass = 0; pass < BDIFF_RESCUE_PASSES; pass++) {
+		bool paired;
+
+		/* A merge is told by the commits it brings together, so
+		 * pairing one of them can be what tells another merge: go
+		 * over the leftovers again for as long as that happens. */
+		do {
+			paired = false;
+
 		for (i = 0; i < bdiff.new_side.commits; i++) {
 			struct bdiff_commit *new_commit = bdiff.new_side.commit[i];
 
 			if (new_commit->peer)
 				continue;
 
+			match = NULL;
+			matches = 0;
+
 			for (j = 0; j < bdiff.old_side.commits; j++) {
 				struct bdiff_commit *old_commit = bdiff.old_side.commit[j];
 
 				if (old_commit->peer ||
-				    !bdiff_rescue_matches(new_commit, old_commit, pass > 0))
+				    !bdiff_rescue_matches(new_commit, old_commit, pass))
 					continue;
 
-				old_commit->peer = new_commit->id;
-				old_commit->peer_pos = new_commit->pos;
-				old_commit->patch_differs = true;
-				new_commit->peer = old_commit->id;
-				new_commit->peer_pos = old_commit->pos;
-				new_commit->patch_differs = true;
-				break;
+				match = old_commit;
+				matches++;
+
+				/* Where the message tells them apart the first
+				 * commit it names is the one; where the commit
+				 * a merge was made on does, another merge made
+				 * on it leaves nothing to tell them apart. */
+				if (pass != BDIFF_RESCUE_MERGE)
+					break;
 			}
+
+			if (!match || (matches > 1 && pass == BDIFF_RESCUE_MERGE))
+				continue;
+
+			match->peer = new_commit->id;
+			match->peer_pos = new_commit->pos;
+			match->patch_differs = true;
+			new_commit->peer = match->id;
+			new_commit->peer_pos = match->pos;
+			new_commit->patch_differs = true;
+			paired = true;
 		}
+		} while (paired && pass == BDIFF_RESCUE_MERGE);
 	}
 }
 

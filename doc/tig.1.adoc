@@ -176,6 +176,11 @@ prompt with `:bdiff [<rev>]`. It keeps up with the history: rewriting it while
 Tig is open and refreshing the view classifies the commits again, against the
 new HEAD.
 
+A merge commit is compared by the diff its merge left over, which is empty
+whenever it went through without a conflict to resolve, so renaming one leaves
+nothing of it to recognise. It is then paired by the commit it was made on,
+whatever the branch it brings in has become.
+
 A rebase moves a branch onto a newer state of the branch it is meant to be
 merged into, so the two sides no longer start at the same commit and
 everything the rebase pulled in shows up as added. '--bdiff-onto <branch>'
